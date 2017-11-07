@@ -55,6 +55,7 @@ const std::string TextureCache::KTX_EXT { "ktx" };
 
 static const QString RESOURCE_SCHEME = "resource";
 static const QUrl SPECTATOR_CAMERA_FRAME_URL("resource://spectatorCameraFrame");
+static const QUrl MIRROR_CAMERA_FRAME_URL("resource://mirrorCameraFrame");
 static const QUrl HMD_PREVIEW_FRAME_URL("resource://hmdPreviewFrame");
 
 static const float SKYBOX_LOAD_PRIORITY { 10.0f }; // Make sure skybox loads first
@@ -1015,6 +1016,21 @@ NetworkTexturePointer TextureCache::getResourceTexture(QUrl resourceTextureUrl) 
             }
         }
     }
+    if (resourceTextureUrl.toString().startsWith(MIRROR_CAMERA_FRAME_URL.toString())) {
+        std::string entityStr = "{" + resourceTextureUrl.toString().toStdString().substr(MIRROR_CAMERA_FRAME_URL.toString().length()) + "}";
+        QUuid mirrorEntityID = QUuid(entityStr.c_str());
+        if (!_mirrorCameraNetworkTexture.contains(mirrorEntityID)) {
+            _mirrorCameraNetworkTexture[mirrorEntityID].reset(new NetworkTexture(resourceTextureUrl));
+        }
+        if (_mirrorCameraFramebuffer.contains(mirrorEntityID)) {
+            texture = _mirrorCameraFramebuffer[mirrorEntityID]->getRenderBuffer(0);
+            if (texture) {
+                texture->setSource(MIRROR_CAMERA_FRAME_URL.toString().toStdString());
+                _mirrorCameraNetworkTexture[mirrorEntityID]->setImage(texture, texture->getWidth(), texture->getHeight());
+                return _mirrorCameraNetworkTexture[mirrorEntityID];
+            }
+        }
+    }
     // FIXME: Generalize this, DRY up this code
     if (resourceTextureUrl == HMD_PREVIEW_FRAME_URL) {
         if (!_hmdPreviewNetworkTexture) {
@@ -1055,4 +1071,20 @@ const gpu::FramebufferPointer& TextureCache::getSpectatorCameraFramebuffer(int w
         emit spectatorCameraFramebufferReset();
     }
     return _spectatorCameraFramebuffer;
+}
+
+const gpu::FramebufferPointer& TextureCache::getMirrorCameraFramebuffer(const QUuid& entityID) {
+    // If we're taking a screenshot and the spectator cam buffer hasn't been created yet, reset to the default size
+    if (!_mirrorCameraFramebuffer.contains(entityID)) {
+        return getMirrorCameraFramebuffer(entityID, DEFAULT_SPECTATOR_CAM_WIDTH, DEFAULT_SPECTATOR_CAM_HEIGHT);
+    }
+    return _mirrorCameraFramebuffer[entityID];
+}
+
+const gpu::FramebufferPointer& TextureCache::getMirrorCameraFramebuffer(const QUuid& entityID, int width, int height) {
+    // If we aren't taking a screenshot, we might need to resize or create the camera buffer
+    if (!_mirrorCameraFramebuffer.contains(entityID) || _mirrorCameraFramebuffer[entityID]->getWidth() != width || _mirrorCameraFramebuffer[entityID]->getHeight() != height) {
+        _mirrorCameraFramebuffer[entityID].reset(gpu::Framebuffer::create("mirrorCamera", gpu::Element::COLOR_SRGBA_32, width, height));
+    }
+    return _mirrorCameraFramebuffer[entityID];
 }

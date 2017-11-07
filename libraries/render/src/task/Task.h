@@ -148,6 +148,7 @@ public:
     const Varying getOutput() const { return _concept->getOutput(); }
     QConfigPointer& getConfiguration() const { return _concept->getConfiguration(); }
     void applyConfiguration() { return _concept->applyConfiguration(); }
+    const std::string& getName() const { return _name; }
 
     template <class T> T& edit() {
         auto concept = std::static_pointer_cast<typename T::JobModel>(_concept);
@@ -221,6 +222,15 @@ public:
         template <class NT, class... NA> const Varying addJob(std::string name, NA&&... args) {
             const auto input = Varying(typename NT::JobModel::Input());
             return addJob<NT>(name, input, std::forward<NA>(args)...);
+        }
+
+        template <class NT> void removeJob(std::string name) {
+            for (Jobs::iterator iter = _jobs.begin(); iter != _jobs.end(); ++iter) {
+                if (iter->getName() == name) {
+                    _jobs.erase(iter);
+                    break;
+                }
+            }
         }
     };
 
@@ -301,6 +311,10 @@ public:
     template <class T, class... A> const Varying addJob(std::string name, A&&... args) {
         const auto input = Varying(typename T::JobModel::Input());
         return std::static_pointer_cast<TaskConcept>(JobType::_concept)->template addJob<T>(name, input, std::forward<A>(args)...);
+    }
+
+    template <class T> void removeJob(std::string name) {
+        std::static_pointer_cast<TaskConcept>(JobType::_concept)->template removeJob<T>(name);
     }
 
     std::shared_ptr<Config> getConfiguration() {

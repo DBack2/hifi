@@ -53,6 +53,7 @@
 #include "avatar/MyAvatar.h"
 #include "BandwidthRecorder.h"
 #include "FancyCamera.h"
+#include "MirrorCameras.h"
 #include "ConnectionMonitor.h"
 #include "CursorManager.h"
 #include "gpu/Context.h"
@@ -563,6 +564,7 @@ private:
     int _avatarSimsPerSecondReport {0};
     quint64 _lastAvatarSimsPerSecondUpdate {0};
     FancyCamera _myCamera;                            // My view onto the world
+    MirrorCameras _mirrorCameras;
 
     Setting::Handle<QString> _previousScriptLocation;
     Setting::Handle<float> _fieldOfView;

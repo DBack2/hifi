@@ -2304,6 +2304,7 @@ void Application::initializeUi() {
     surfaceContext->setContextProperty("UserActivityLogger", DependencyManager::get<UserActivityLoggerScriptingInterface>().data());
 
     surfaceContext->setContextProperty("Camera", &_myCamera);
+    surfaceContext->setContextProperty("MirrorCameras", &_mirrorCameras);
 
 #if defined(Q_OS_MAC) || defined(Q_OS_WIN)
     surfaceContext->setContextProperty("SpeechRecognizer", DependencyManager::get<SpeechRecognizer>().data());
@@ -5792,6 +5793,7 @@ void Application::registerScriptEngineWithApplicationServices(ScriptEnginePointe
     scriptEngine->registerGlobalObject("AvatarList", DependencyManager::get<AvatarManager>().data());
 
     scriptEngine->registerGlobalObject("Camera", &_myCamera);
+    scriptEngine->registerGlobalObject("MirrorCameras", &_mirrorCameras);
 
 #if defined(Q_OS_MAC) || defined(Q_OS_WIN)
     scriptEngine->registerGlobalObject("SpeechRecognizer", DependencyManager::get<SpeechRecognizer>().data());

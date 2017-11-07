@@ -171,6 +171,8 @@ public:
     const gpu::FramebufferPointer& getHmdPreviewFramebuffer(int width, int height);
     const gpu::FramebufferPointer& getSpectatorCameraFramebuffer();
     const gpu::FramebufferPointer& getSpectatorCameraFramebuffer(int width, int height);
+    const gpu::FramebufferPointer& getMirrorCameraFramebuffer(const QUuid& entityID);
+    const gpu::FramebufferPointer& getMirrorCameraFramebuffer(const QUuid& entityID, int width, int height);
 
     static const int DEFAULT_SPECTATOR_CAM_WIDTH { 2048 };
     static const int DEFAULT_SPECTATOR_CAM_HEIGHT { 1024 };
@@ -209,6 +211,9 @@ private:
 
     NetworkTexturePointer _spectatorCameraNetworkTexture;
     gpu::FramebufferPointer _spectatorCameraFramebuffer;
+
+    QHash<QUuid, NetworkTexturePointer> _mirrorCameraNetworkTexture;
+    QHash<QUuid, gpu::FramebufferPointer> _mirrorCameraFramebuffer;
 
     NetworkTexturePointer _hmdPreviewNetworkTexture;
     gpu::FramebufferPointer _hmdPreviewFramebuffer;

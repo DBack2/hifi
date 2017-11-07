@@ -233,4 +233,6 @@ void Application::runRenderFrame(RenderArgs* renderArgs) {
         _renderEngine->getRenderContext()->args = renderArgs;
         _renderEngine->run();
     }
+
+    _mirrorCameras.deleteCameras();
 }
