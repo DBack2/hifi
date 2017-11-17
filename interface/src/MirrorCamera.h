@@ -16,29 +16,20 @@
 #include <EntityTypes.h>
 #include <RenderDeferredTask.h>
 
-class MirrorCamera {
-public:
-    MirrorCamera(const QUuid& entityID);
-    ~MirrorCamera();
-
-    void markForDelete() { _markedForDelete = true; }
-    bool markedForDelete() const { return _markedForDelete; }
-
-private:
-    QUuid _entityID;
-    bool _markedForDelete { false };
-};
+class MirrorCameraJob;
 
 class MirrorCameraJobConfig : public render::Task::Config { // Exposes secondary camera parameters to JavaScript.
     Q_OBJECT
 public:
-    MirrorCameraJobConfig() : render::Task::Config(true) {}
+    QUuid entityID;
+
+    MirrorCameraJobConfig() : render::Task::Config(false) {}
 };
 
 class MirrorCameraRenderTaskConfig : public render::Task::Config {
     Q_OBJECT
 public:
-    MirrorCameraRenderTaskConfig() : render::Task::Config(true) {}
+    MirrorCameraRenderTaskConfig() : render::Task::Config(false) {}
 };
 
 class MirrorCameraRenderTask {
@@ -47,7 +38,21 @@ public:
     using JobModel = render::Task::Model<MirrorCameraRenderTask, Config>;
     MirrorCameraRenderTask() {}
     void configure(const Config& config) {}
-    void build(JobModel& task, const render::Varying& inputs, render::Varying& outputs, render::CullFunctor cullFunctor, const QUuid& entityID);
+    void build(JobModel& task, const render::Varying& inputs, render::Varying& outputs, render::CullFunctor cullFunctor, int jobIndex);
+};
+
+class MirrorCamera {
+public:
+    MirrorCamera(const QUuid& entityID, int renderJobIndex);
+    ~MirrorCamera();
+
+    void markForDelete() { _markedForDelete = true; }
+    bool markedForDelete() const { return _markedForDelete; }
+
+private:
+    QUuid _entityID;
+    int _renderJobIndex{ -1 };
+    bool _markedForDelete{ false };
 };
 
 #endif // hifi_MirrorCamera_h

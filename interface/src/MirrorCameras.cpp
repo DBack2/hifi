@@ -22,9 +22,16 @@ MirrorCameras::~MirrorCameras() {
 
 void MirrorCameras::addCamera(const QUuid& entityID) {
     QWriteLocker writeLocker { &_camerasLock };
-    if (!_cameras.contains(entityID)) {
-        _cameras[entityID] = new MirrorCamera(entityID);
+    
+    int renderJob = getAvailableRenderJob();
+    if (renderJob == -1) {
+        return;
     }
+
+    if (!_cameras.contains(entityID)) {
+        _cameras[entityID] = new MirrorCamera(entityID, renderJob);
+    }
+
     writeLocker.unlock();
 }
 
@@ -33,7 +40,10 @@ void MirrorCameras::removeCamera(const QUuid& entityID) {
     auto iter = _cameras.find(entityID);
     if (iter != _cameras.end()) {
         MirrorCamera* camera = (*iter);
-        camera->markForDelete();
+        _cameras.erase(iter);
+        delete camera;
+        //MirrorCamera* camera = (*iter);
+        //camera->markForDelete();
     }
     writeLocker.unlock();
 }
@@ -50,4 +60,14 @@ void MirrorCameras::deleteCameras() {
         }
     }
     writeLocker.unlock();
+}
+
+int MirrorCameras::getAvailableRenderJob() {
+    for (int i = 0; i < _cameraRenderJobs.size(); ++i) {
+        if (!_cameraRenderJobs[i]) {
+            _cameraRenderJobs[i] = true;
+            return i;
+        }
+    }
+    return -1;
 }

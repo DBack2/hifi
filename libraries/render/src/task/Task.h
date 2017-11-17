@@ -223,15 +223,6 @@ public:
             const auto input = Varying(typename NT::JobModel::Input());
             return addJob<NT>(name, input, std::forward<NA>(args)...);
         }
-
-        template <class NT> void removeJob(std::string name) {
-            for (Jobs::iterator iter = _jobs.begin(); iter != _jobs.end(); ++iter) {
-                if (iter->getName() == name) {
-                    _jobs.erase(iter);
-                    break;
-                }
-            }
-        }
     };
 
     template <class T, class C = Config, class I = None, class O = None> class TaskModel : public TaskConcept {
@@ -312,11 +303,6 @@ public:
         const auto input = Varying(typename T::JobModel::Input());
         return std::static_pointer_cast<TaskConcept>(JobType::_concept)->template addJob<T>(name, input, std::forward<A>(args)...);
     }
-
-    template <class T> void removeJob(std::string name) {
-        std::static_pointer_cast<TaskConcept>(JobType::_concept)->template removeJob<T>(name);
-    }
-
     std::shared_ptr<Config> getConfiguration() {
         return std::static_pointer_cast<Config>(JobType::_concept->getConfiguration());
     }

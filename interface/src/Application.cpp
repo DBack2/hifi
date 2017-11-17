@@ -2189,6 +2189,10 @@ void Application::initializeGL() {
     bool isDeferred = !QProcessEnvironment::systemEnvironment().contains(RENDER_FORWARD);
     _renderEngine->addJob<UpdateSceneTask>("UpdateScene");
     _renderEngine->addJob<SecondaryCameraRenderTask>("SecondaryCameraJob", cullFunctor);
+    for (int i = 0; i < 1; ++i) {
+        _renderEngine->addJob<MirrorCameraRenderTask>("MirrorCameraJob", cullFunctor, i);
+    }
+    _mirrorCameras.setRenderJobs(1);
     _renderEngine->addJob<RenderViewTask>("RenderMainView", cullFunctor, isDeferred);
     _renderEngine->load();
     _renderEngine->registerScene(_main3DScene);

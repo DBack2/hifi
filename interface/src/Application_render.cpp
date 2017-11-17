@@ -234,5 +234,5 @@ void Application::runRenderFrame(RenderArgs* renderArgs) {
         _renderEngine->run();
     }
 
-    _mirrorCameras.deleteCameras();
+    //_mirrorCameras.deleteCameras();
 }

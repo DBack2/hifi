@@ -13,111 +13,42 @@
 #include "Application.h"
 #include "task\Task.h"
 #include "LODManager.h"
+#include <glm/gtx/transform.hpp>
 
 using RenderArgsPointer = std::shared_ptr<RenderArgs>;
-
-MirrorCamera::MirrorCamera(const QUuid& entityID)
-    :_entityID(entityID) {
-    qApp->getRenderEngine()->addJob<MirrorCameraRenderTask>("MirrorCameraJob" + _entityID.toString().toStdString(), LODManager::shouldRender, entityID);
-}
-
-MirrorCamera::~MirrorCamera() {
-    qApp->getRenderEngine()->removeJob<MirrorCameraRenderTask>("MirrorCameraJob" + _entityID.toString().toStdString());
-}
 
 class MirrorCameraJob {  // Changes renderContext for our framebuffer and view.
 public:
     using Config = MirrorCameraJobConfig;
     using JobModel = render::Job::ModelO<MirrorCameraJob, RenderArgsPointer, Config>;
-    MirrorCameraJob(const QUuid& entityID) 
-        :_entityID(entityID) {
+    MirrorCameraJob() {
         _cachedArgsPointer = std::make_shared<RenderArgs>(_cachedArgs);
     }
 
-    void configure(const Config& config) {};
-
-    void setProjection(ViewFrustum& srcViewFrustum, float aspect) {
-        glm::vec3 eyePos = qApp->getCamera().getPosition();
-
-        EntityPropertyFlags entityPropFlags;
-        EntityItemProperties entityProperties = DependencyManager::get<EntityScriptingInterface>()->getEntityProperties(_entityID, entityPropFlags);
-        glm::vec3 mirrorPropsPos = entityProperties.getPosition();
-        glm::quat mirrorPropsRot = entityProperties.getRotation();
-        glm::vec3 mirrorPropsDim = entityProperties.getDimensions();
-
-        // get the 4 mirror's vertices positions on main camera side of the mirror
-        // mirrorVertices[0] = upper left vertex (if facing from mirrored camera side of mirror)
-        // mirrorVertices[1] = lower left vertex (if facing from mirrored camera side of mirror)
-        // mirrorVertices[2] = upper right vertex (if facing from mirrored camera side of mirror)
-        // mirrorVertices[3] = lower right vertex (if facing from mirrored camera side of mirror)
-        glm::vec3 mirrorVertices[4];
-        float vertexPosX, vertexPosY, vertexPosZ;
-        for (int i = 0; i < 2; ++i) {
-            if (i == 0) {
-                vertexPosX = 0.5f * mirrorPropsDim.x;
-            } else {
-                vertexPosX = -0.5f * mirrorPropsDim.x;
-            }
-            for (int j = 0; j < 2; ++j) {
-                if (j == 0) {
-                    vertexPosY = 0.5f * mirrorPropsDim.y;
-                } else {
-                    vertexPosY = -0.5f * mirrorPropsDim.y;
-                }
-                vertexPosZ = mirrorPropsDim.z;
-                glm::vec3 localPos = glm::vec3(vertexPosX, vertexPosY, vertexPosZ);
-                mirrorVertices[j + i * 2] = (mirrorPropsRot * localPos) + mirrorPropsPos;
-            }
-        }
-
-        // get mirrored camera's position and rotation reflected about the mirror plane
-        glm::vec3 mirrorLocalPos = mirrorPropsRot * glm::vec3(0.f, 0.f, 0.f);
-        glm::vec3 mirrorWorldPos = mirrorPropsPos + mirrorLocalPos;
-        glm::vec3 mirrorToHeadVec = eyePos - mirrorWorldPos;
-        glm::vec3 zLocalVecNormalized = mirrorPropsRot * Vectors::UNIT_Z;
-        float distanceFromMirror = glm::dot(zLocalVecNormalized, mirrorToHeadVec);
-        glm::vec3 mirrorCamPos = eyePos - (2.f * distanceFromMirror * zLocalVecNormalized);
-        glm::quat mirrorCamOrientation = glm::inverse(glm::lookAt(mirrorCamPos, mirrorWorldPos, mirrorPropsRot * Vectors::UP));
-        srcViewFrustum.setPosition(mirrorCamPos);
-        srcViewFrustum.setOrientation(mirrorCamOrientation);
-
-        glm::vec3 pa = mirrorVertices[1]; // lower left vertex (if facing from mirrored camera side of mirror)
-        glm::vec3 pb = mirrorVertices[3]; // lower right vertex (if facing from mirrored camera side of mirror)
-        glm::vec3 pc = mirrorVertices[0]; // upper left vertex (if facing from mirrored camera side of mirror)
-        glm::vec3 pe = mirrorCamPos;
-        glm::vec3 papb = pb - pa;
-        glm::vec3 papc = pc - pa;
-        glm::vec3 va = pa - pe;
-        glm::vec3 mirrorNormal = -glm::normalize(glm::cross(papb, papc)); // negate normal to point away from mirrored camera
-        float fovRadians = glm::atan((glm::length(papb) + glm::length(papc)) / glm::length(va));
-
-        float minDistance = FLT_MAX;
-        float maxDistance = 0.f;
-        for (uint8_t i = 0; i < sizeof(mirrorVertices) / sizeof(glm::vec3); ++i) {
-            float distance = glm::abs(glm::distance(mirrorVertices[i], mirrorCamPos));
-            if (distance < minDistance) {
-                minDistance = distance;
-            }
-            if (distance > maxDistance) {
-                maxDistance = distance;
-            }
-        }
-        // initial near clip plane rests at the mirror vertex the minimum distance away from mirrored camera
-        // should we use max vertex distance instead? or maybe average distance?
-        float _nearClipPlaneDistance = maxDistance;
-        float _farClipPlaneDistance = 16000.f;
-
-        // get our standard perspective projection matrix
-        glm::mat4 projection = glm::perspective(fovRadians, aspect, _nearClipPlaneDistance, _farClipPlaneDistance);
-
-        srcViewFrustum.setProjection(projection);
+    void configure(const Config& config) {
+        _entityID = config.entityID;
     }
 
     void run(const render::RenderContextPointer& renderContext, RenderArgsPointer& cachedArgs) {
+        if (_entityID.isNull()) {
+            return;
+        }
+
         auto args = renderContext->args;
         auto textureCache = DependencyManager::get<TextureCache>();
         gpu::FramebufferPointer destFramebuffer;
-        destFramebuffer = textureCache->getMirrorCameraFramebuffer(_entityID);
+
+        EntityPropertyFlags entityPropFlags;
+        EntityItemProperties entityProperties = DependencyManager::get<EntityScriptingInterface>()->getEntityProperties(_entityID, entityPropFlags);
+        glm::vec3 mirrorPropertiesPosition = entityProperties.getPosition();
+        glm::quat mirrorPropertiesRotation = entityProperties.getRotation();
+        glm::vec3 mirrorPropertiesDimensions = entityProperties.getDimensions();
+        glm::vec3 halfMirrorPropertiesDimensions = 0.5f * mirrorPropertiesDimensions;
+
+        float textureWidth = 1024 * mirrorPropertiesDimensions.x;
+        float textureHeight = 1024 * mirrorPropertiesDimensions.y;
+
+        destFramebuffer = textureCache->getMirrorCameraFramebuffer(_entityID, textureWidth, textureHeight);
         if (destFramebuffer) {
             _cachedArgsPointer->_blitFramebuffer = args->_blitFramebuffer;
             _cachedArgsPointer->_viewport = args->_viewport;
@@ -133,7 +64,32 @@ public:
                 batch.disableContextViewCorrection();
             });
             auto srcViewFrustum = args->getViewFrustum();
-            setProjection(srcViewFrustum, (float)args->_viewport.z / (float)args->_viewport.w);
+
+            // setup mirror from world as inverse of world from mirror transformation using inverted x and z for mirrored image
+            // TODO: we are assuming here that UP is world y-axis
+            glm::mat4 worldFromMirrorRotation = glm::mat4_cast(mirrorPropertiesRotation) * glm::scale(vec3(-1.0f, 1.0f, -1.0f));
+            glm::mat4 worldFromMirrorTranslation = glm::translate(mirrorPropertiesPosition);
+            glm::mat4 worldFromMirror = worldFromMirrorTranslation * worldFromMirrorRotation;
+            glm::mat4 mirrorFromWorld = glm::inverse(worldFromMirror);
+
+            // get mirror camera position by reflecting main camera position's z coordinate in mirror space
+            glm::vec3 mainCameraPositionWorld = qApp->getCamera().getPosition();
+            glm::vec3 mainCameraPositionMirror = vec3(mirrorFromWorld * vec4(mainCameraPositionWorld, 1.0f));
+            glm::vec3 mirrorCameraPositionMirror = vec3(mainCameraPositionMirror.x, mainCameraPositionMirror.y, -mainCameraPositionMirror.z);
+            glm::vec3 mirrorCameraPositionWorld = vec3(worldFromMirror * vec4(mirrorCameraPositionMirror, 1.0f));
+
+            // set frustum position to be mirrored camera and set orientation to mirror's adjusted rotation
+            glm::quat mirrorCameraOrientation = glm::quat_cast(worldFromMirrorRotation);
+            srcViewFrustum.setPosition(mirrorCameraPositionWorld);
+            srcViewFrustum.setOrientation(mirrorCameraOrientation);
+
+            // build frustum using mirror space translation of mirrored camera
+            float nearClip = mirrorCameraPositionMirror.z + mirrorPropertiesDimensions.z * 2.0f;
+            glm::vec3 upperRight = halfMirrorPropertiesDimensions - mirrorCameraPositionMirror;
+            glm::vec3 bottomLeft = -halfMirrorPropertiesDimensions - mirrorCameraPositionMirror;
+            glm::mat4 frustum = glm::frustum(bottomLeft.x, upperRight.x, bottomLeft.y, upperRight.y, nearClip, 16384.0f);
+            srcViewFrustum.setProjection(frustum);
+
             srcViewFrustum.calculate();
             args->pushViewFrustum(srcViewFrustum);
             cachedArgs = _cachedArgsPointer;
@@ -143,6 +99,8 @@ public:
 protected:
     RenderArgs _cachedArgs;
     RenderArgsPointer _cachedArgsPointer;
+
+private:
     QUuid _entityID;
 };
 
@@ -165,11 +123,24 @@ public:
     }
 };
 
-void MirrorCameraRenderTask::build(JobModel& task, const render::Varying& inputs, render::Varying& outputs, render::CullFunctor cullFunctor, const QUuid& entityID) {
-    auto& test = task._jobs.back();
-    const auto cachedArg = task.addJob<MirrorCameraJob>("MirrorCamera", entityID);
+void MirrorCameraRenderTask::build(JobModel& task, const render::Varying& inputs, render::Varying& outputs, render::CullFunctor cullFunctor, int jobIndex) {
+    const auto cachedArg = task.addJob<MirrorCameraJob>("MirrorCamera");
     const auto items = task.addJob<RenderFetchCullSortTask>("FetchCullSort", cullFunctor);
     assert(items.canCast<RenderFetchCullSortTask::Output>());
     task.addJob<RenderDeferredTask>("RenderDeferredTask", items);
     task.addJob<EndMirrorCameraFrame>("EndMirrorCamera", cachedArg);
+}
+
+MirrorCamera::MirrorCamera(const QUuid& entityID, int renderJobIndex)
+    :_entityID(entityID),
+    _renderJobIndex(renderJobIndex) {
+    qobject_cast<MirrorCameraJobConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCamera"))->entityID = _entityID;
+    qobject_cast<MirrorCameraJobConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCamera"))->setEnabled(true);
+    qobject_cast<MirrorCameraRenderTaskConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCameraJob"))->setEnabled(true);
+}
+
+MirrorCamera::~MirrorCamera() {
+    qobject_cast<MirrorCameraJobConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCamera"))->entityID = QUuid();
+    qobject_cast<MirrorCameraJobConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCamera"))->setEnabled(false);
+    qobject_cast<MirrorCameraRenderTaskConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCameraJob"))->setEnabled(false);
 }
