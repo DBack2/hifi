@@ -40,6 +40,7 @@ void MirrorCameras::removeCamera(const QUuid& entityID) {
     auto iter = _cameras.find(entityID);
     if (iter != _cameras.end()) {
         MirrorCamera* camera = (*iter);
+        _cameraRenderJobs[camera->getRenderJobIndex()] = false;
         _cameras.erase(iter);
         delete camera;
         //MirrorCamera* camera = (*iter);

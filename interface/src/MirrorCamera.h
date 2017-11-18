@@ -48,6 +48,7 @@ public:
 
     void markForDelete() { _markedForDelete = true; }
     bool markedForDelete() const { return _markedForDelete; }
+    int getRenderJobIndex() const { return _renderJobIndex;  }
 
 private:
     QUuid _entityID;
