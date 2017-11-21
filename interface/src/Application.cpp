@@ -120,6 +120,7 @@
 #include <SceneScriptingInterface.h>
 #include <ScriptEngines.h>
 #include <ScriptCache.h>
+#include <ShapeEntityItem.h>
 #include <SoundCache.h>
 #include <ui/TabletScriptingInterface.h>
 #include <ui/ToolbarScriptingInterface.h>
@@ -201,6 +202,8 @@
 #include "commerce/Ledger.h"
 #include "commerce/Wallet.h"
 #include "commerce/QmlCommerce.h"
+
+#include "webbrowser/WebBrowserSuggestionsEngine.h"
 
 // On Windows PC, NVidia Optimus laptop, we want to enable NVIDIA GPU
 // FIXME seems to be broken.
@@ -691,7 +694,6 @@ bool setupEssentials(int& argc, char** argv, bool runningMarkerExisted) {
     DependencyManager::set<CloseEventSender>();
     DependencyManager::set<ResourceManager>();
     DependencyManager::set<SelectionScriptingInterface>();
-    DependencyManager::set<ContextOverlayInterface>();
     DependencyManager::set<Ledger>();
     DependencyManager::set<Wallet>();
     DependencyManager::set<WalletScriptingInterface>();
@@ -759,7 +761,9 @@ Application::Application(int& argc, char** argv, QElapsedTimer& startupTimer, bo
     _notifiedPacketVersionMismatchThisDomain(false),
     _maxOctreePPS(maxOctreePacketsPerSecond.get()),
     _lastFaceTrackerUpdate(0),
-    _snapshotSound(nullptr)
+    _snapshotSound(nullptr),
+    _sampleSound(nullptr)
+
 {
     auto steamClient = PluginManager::getInstance()->getSteamClientPlugin();
     setProperty(hifi::properties::STEAM, (steamClient && steamClient->isRunning()));
@@ -804,7 +808,6 @@ Application::Application(int& argc, char** argv, QElapsedTimer& startupTimer, bo
     installNativeEventFilter(&MyNativeEventFilter::getInstance());
 #endif
 
-    
     _logger = new FileLogger(this);
     qInstallMessageHandler(messageHandler);
 
@@ -981,6 +984,10 @@ Application::Application(int& argc, char** argv, QElapsedTimer& startupTimer, bo
     connect(myAvatar.get(), &MyAvatar::positionGoneTo,
         DependencyManager::get<AddressManager>().data(), &AddressManager::storeCurrentAddress);
 
+    // Inititalize sample before registering
+    QFileInfo infSample = QFileInfo(PathUtils::resourcesPath() + "sounds/sample.wav");
+    _sampleSound = DependencyManager::get<SoundCache>()->getSound(QUrl::fromLocalFile(infSample.absoluteFilePath()));
+
     auto scriptEngines = DependencyManager::get<ScriptEngines>().data();
     scriptEngines->registerScriptInitializer([this](ScriptEnginePointer engine){
         registerScriptEngineWithApplicationServices(engine);
@@ -1013,6 +1020,7 @@ Application::Application(int& argc, char** argv, QElapsedTimer& startupTimer, bo
 
     // connect to the packet sent signal of the _entityEditSender
     connect(&_entityEditSender, &EntityEditPacketSender::packetSent, this, &Application::packetSent);
+    connect(&_entityEditSender, &EntityEditPacketSender::addingEntityWithCertificate, this, &Application::addingEntityWithCertificate);
 
     const char** constArgv = const_cast<const char**>(argv);
     QString concurrentDownloadsStr = getCmdOption(argc, constArgv, "--concurrent-downloads");
@@ -1177,12 +1185,19 @@ Application::Application(int& argc, char** argv, QElapsedTimer& startupTimer, bo
     _entityEditSender.setServerJurisdictions(&_entityServerJurisdictions);
     _entityEditSender.setMyAvatar(myAvatar.get());
 
+    // The entity octree will have to know about MyAvatar for the parentJointName import
+    getEntities()->getTree()->setMyAvatar(myAvatar);
+    _entityClipboard->setMyAvatar(myAvatar);
+
     // For now we're going to set the PPS for outbound packets to be super high, this is
     // probably not the right long term solution. But for now, we're going to do this to
     // allow you to move an entity around in your hand
     _entityEditSender.setPacketsPerSecond(3000); // super high!!
 
+    // Overlays need to exist before we set the ContextOverlayInterface dependency
     _overlays.init(); // do this before scripts load
+    DependencyManager::set<ContextOverlayInterface>();
+
     // Make sure we don't time out during slow operations at startup
     updateHeartbeat();
 
@@ -1383,7 +1398,6 @@ Application::Application(int& argc, char** argv, QElapsedTimer& startupTimer, bo
     // Make sure we don't time out during slow operations at startup
     updateHeartbeat();
 
-
     QTimer* settingsTimer = new QTimer();
     moveToNewNamedThread(settingsTimer, "Settings Thread", [this, settingsTimer]{
         connect(qApp, &Application::beforeAboutToQuit, [this, settingsTimer]{
@@ -1472,52 +1486,18 @@ Application::Application(int& argc, char** argv, QElapsedTimer& startupTimer, bo
         }
     });
 
-    // If the user clicks somewhere where there is NO entity at all, we will release focus
-    connect(getEntities().data(), &EntityTreeRenderer::mousePressOffEntity, [=]() {
-        setKeyboardFocusEntity(UNKNOWN_ENTITY_ID);
-    });
-
     // Keyboard focus handling for Web overlays.
     auto overlays = &(qApp->getOverlays());
-
-    connect(overlays, &Overlays::mousePressOnOverlay, [=](const OverlayID& overlayID, const PointerEvent& event) {
-        auto thisOverlay = std::dynamic_pointer_cast<Web3DOverlay>(overlays->getOverlay(overlayID));
-        // Only Web overlays can have keyboard focus.
-        if (thisOverlay) {
-            setKeyboardFocusEntity(UNKNOWN_ENTITY_ID);
-            setKeyboardFocusOverlay(overlayID);
-        }
-    });
-
     connect(overlays, &Overlays::overlayDeleted, [=](const OverlayID& overlayID) {
         if (overlayID == _keyboardFocusedOverlay.get()) {
             setKeyboardFocusOverlay(UNKNOWN_OVERLAY_ID);
         }
     });
 
-    connect(overlays, &Overlays::mousePressOffOverlay, [=]() {
-        setKeyboardFocusOverlay(UNKNOWN_OVERLAY_ID);
-    });
-
     connect(this, &Application::aboutToQuit, [=]() {
         setKeyboardFocusOverlay(UNKNOWN_OVERLAY_ID);
         setKeyboardFocusEntity(UNKNOWN_ENTITY_ID);
     });
-
-    connect(overlays,
-        SIGNAL(mousePressOnOverlay(const OverlayID&, const PointerEvent&)),
-        DependencyManager::get<ContextOverlayInterface>().data(),
-        SLOT(contextOverlays_mousePressOnOverlay(const OverlayID&, const PointerEvent&)));
-
-    connect(overlays,
-        SIGNAL(hoverEnterOverlay(const OverlayID&, const PointerEvent&)),
-        DependencyManager::get<ContextOverlayInterface>().data(),
-        SLOT(contextOverlays_hoverEnterOverlay(const OverlayID&, const PointerEvent&)));
-
-    connect(overlays,
-        SIGNAL(hoverLeaveOverlay(const OverlayID&, const PointerEvent&)),
-        DependencyManager::get<ContextOverlayInterface>().data(),
-        SLOT(contextOverlays_hoverLeaveOverlay(const OverlayID&, const PointerEvent&)));
 
     // Add periodic checks to send user activity data
     static int CHECK_NEARBY_AVATARS_INTERVAL_MS = 10000;
@@ -1725,8 +1705,6 @@ Application::Application(int& argc, char** argv, QElapsedTimer& startupTimer, bo
         lastLeftHandPose = leftHandPose;
         lastRightHandPose = rightHandPose;
 
-        properties["local_socket_changes"] = DependencyManager::get<StatTracker>()->getStat(LOCAL_SOCKET_CHANGE_STAT).toInt();
-
         UserActivityLogger::getInstance().logAction("stats", properties);
     });
     sendStatsTimer->start();
@@ -1787,9 +1765,9 @@ Application::Application(int& argc, char** argv, QElapsedTimer& startupTimer, bo
         return entityServerNode && !isPhysicsEnabled();
     });
 
-    QFileInfo inf = QFileInfo(PathUtils::resourcesPath() + "sounds/snap.wav");
-    _snapshotSound = DependencyManager::get<SoundCache>()->getSound(QUrl::fromLocalFile(inf.absoluteFilePath()));
-
+    QFileInfo infSnap = QFileInfo(PathUtils::resourcesPath() + "sounds/snap.wav");
+    _snapshotSound = DependencyManager::get<SoundCache>()->getSound(QUrl::fromLocalFile(infSnap.absoluteFilePath()));
+    
     QVariant testProperty = property(hifi::properties::TEST);
     qDebug() << testProperty;
     if (testProperty.isValid()) {
@@ -1849,6 +1827,9 @@ Application::Application(int& argc, char** argv, QElapsedTimer& startupTimer, bo
 
     // Preload Tablet sounds
     DependencyManager::get<TabletScriptingInterface>()->preloadSounds();
+
+    _pendingIdleEvent = false;
+    _pendingRenderEvent = false;
 
     qCDebug(interfaceapp) << "Metaverse session ID is" << uuidStringWithoutCurlyBraces(accountManager->getSessionID());
 }
@@ -2253,6 +2234,7 @@ void Application::initializeUi() {
     QmlCommerce::registerType();
     qmlRegisterType<ResourceImageItem>("Hifi", 1, 0, "ResourceImageItem");
     qmlRegisterType<Preference>("Hifi", 1, 0, "Preference");
+    qmlRegisterType<WebBrowserSuggestionsEngine>("HifiWeb", 1, 0, "WebBrowserSuggestionsEngine");
 
     auto offscreenUi = DependencyManager::get<OffscreenUi>();
     offscreenUi->create();
@@ -2724,7 +2706,7 @@ bool Application::importFromZIP(const QString& filePath) {
     qDebug() << "A zip file has been dropped in: " << filePath;
     QUrl empty;
     // handle Blocks download from Marketplace
-    if (filePath.contains("vr.google.com/downloads")) {
+    if (filePath.contains("poly.google.com/downloads")) {
         addAssetToWorldFromURL(filePath);
     } else {
         qApp->getFileDownloadInterface()->runUnzip(filePath, empty, true, true, false);
@@ -4027,6 +4009,7 @@ bool Application::exportEntities(const QString& filename,
 
     auto entityTree = getEntities()->getTree();
     auto exportTree = std::make_shared<EntityTree>();
+    exportTree->setMyAvatar(getMyAvatar());
     exportTree->createRootElement();
     glm::vec3 root(TREE_SCALE, TREE_SCALE, TREE_SCALE);
     bool success = true;
@@ -4208,6 +4191,7 @@ void Application::initDisplay() {
 }
 
 void Application::init() {
+    
     // Make sure Login state is up to date
     DependencyManager::get<DialogsManager>()->toggleLoginDialog();
 
@@ -4233,6 +4217,10 @@ void Application::init() {
 
     // fire off an immediate domain-server check in now that settings are loaded
     DependencyManager::get<NodeList>()->sendDomainServerCheckIn();
+
+    // This allows collision to be set up properly for shape entities supported by GeometryCache.
+    // This is before entity setup to ensure that it's ready for whenever instance collision is initialized.
+    ShapeEntityItem::setShapeInfoCalulator(ShapeEntityItem::ShapeInfoCalculator(&shapeInfoCalculator));
 
     getEntities()->init();
     getEntities()->setEntityLoadingPriorityFunction([this](const EntityItem& item) {
@@ -4467,7 +4455,7 @@ void Application::cameraModeChanged() {
 void Application::cameraMenuChanged() {
     auto menu = Menu::getInstance();
     if (menu->isOptionChecked(MenuOption::FullscreenMirror)) {
-        if (_myCamera.getMode() != CAMERA_MODE_MIRROR) {
+        if (!isHMDMode() && _myCamera.getMode() != CAMERA_MODE_MIRROR) {
             _myCamera.setMode(CAMERA_MODE_MIRROR);
             getMyAvatar()->reset(false, false, false); // to reset any active MyAvatar::FollowHelpers
         }
@@ -4507,8 +4495,11 @@ void Application::resetPhysicsReadyInformation() {
 
 void Application::reloadResourceCaches() {
     resetPhysicsReadyInformation();
+
     // Query the octree to refresh everything in view
     _lastQueriedTime = 0;
+    _octreeQuery.incrementConnectionID();
+
     queryOctree(NodeType::EntityServer, PacketType::EntityQuery, _entityServerJurisdictions);
 
     DependencyManager::get<AssetClient>()->clearCache();
@@ -4556,14 +4547,9 @@ QUuid Application::getKeyboardFocusEntity() const {
     return _keyboardFocusedEntity.get();
 }
 
-void Application::setKeyboardFocusEntity(QUuid id) {
-    EntityItemID entityItemID(id);
-    setKeyboardFocusEntity(entityItemID);
-}
-
 static const float FOCUS_HIGHLIGHT_EXPANSION_FACTOR = 1.05f;
 
-void Application::setKeyboardFocusEntity(EntityItemID entityItemID) {
+void Application::setKeyboardFocusEntity(const EntityItemID& entityItemID) {
     if (_keyboardFocusedEntity.get() != entityItemID) {
         _keyboardFocusedEntity.set(entityItemID);
 
@@ -4600,7 +4586,7 @@ OverlayID Application::getKeyboardFocusOverlay() {
     return _keyboardFocusedOverlay.get();
 }
 
-void Application::setKeyboardFocusOverlay(OverlayID overlayID) {
+void Application::setKeyboardFocusOverlay(const OverlayID& overlayID) {
     if (overlayID != _keyboardFocusedOverlay.get()) {
         _keyboardFocusedOverlay.set(overlayID);
 
@@ -5096,6 +5082,7 @@ void Application::update(float deltaTime) {
         }
 
         this->updateCamera(appRenderArgs._renderArgs);
+        appRenderArgs._eyeToWorld = _myCamera.getTransform();
         appRenderArgs._isStereo = false;
 
         {
@@ -5527,6 +5514,8 @@ void Application::clearDomainOctreeDetails() {
     DependencyManager::get<ModelCache>()->clearUnusedResources();
     DependencyManager::get<SoundCache>()->clearUnusedResources();
     DependencyManager::get<TextureCache>()->clearUnusedResources();
+
+    getMyAvatar()->setAvatarEntityDataChanged(true);
 }
 
 void Application::clearDomainAvatars() {
@@ -5573,6 +5562,7 @@ void Application::nodeActivated(SharedNodePointer node) {
     // so we will do a proper query during update
     if (node->getType() == NodeType::EntityServer) {
         _lastQueriedTime = 0;
+        _octreeQuery.incrementConnectionID();
     }
 
     if (node->getType() == NodeType::AudioMixer) {
@@ -5768,6 +5758,11 @@ int Application::processOctreeStats(ReceivedMessage& message, SharedNodePointer 
 }
 
 void Application::packetSent(quint64 length) {
+}
+
+void Application::addingEntityWithCertificate(const QString& certificateID, const QString& placeName) {
+    auto ledger = DependencyManager::get<Ledger>();
+    ledger->updateLocation(certificateID, placeName);
 }
 
 void Application::registerScriptEngineWithApplicationServices(ScriptEnginePointer scriptEngine) {
@@ -6261,7 +6256,7 @@ void Application::addAssetToWorldFromURL(QString url) {
     if (url.contains("filename")) {
         filename = url.section("filename=", 1, 1);  // Filename is in "?filename=" parameter at end of URL.
     }
-    if (url.contains("vr.google.com/downloads")) {
+    if (url.contains("poly.google.com/downloads")) {
         filename = url.section('/', -1);
         if (url.contains("noDownload")) {
             filename.remove(".zip?noDownload=false");
@@ -6296,7 +6291,7 @@ void Application::addAssetToWorldFromURLRequestFinished() {
     if (url.contains("filename")) {
         filename = url.section("filename=", 1, 1);  // Filename is in "?filename=" parameter at end of URL.
     }
-    if (url.contains("vr.google.com/downloads")) {
+    if (url.contains("poly.google.com/downloads")) {
         filename = url.section('/', -1);
         if (url.contains("noDownload")) {
             filename.remove(".zip?noDownload=false");
@@ -6350,20 +6345,14 @@ void Application::addAssetToWorldUnzipFailure(QString filePath) {
     addAssetToWorldError(filename, "Couldn't unzip file " + filename + ".");
 }
 
-void Application::addAssetToWorld(QString filePath, QString zipFile, bool isZip, bool isBlocks) {
+void Application::addAssetToWorld(QString path, QString zipFile, bool isZip, bool isBlocks) {
     // Automatically upload and add asset to world as an alternative manual process initiated by showAssetServerWidget().
     QString mapping;
-    QString path = filePath;
     QString filename = filenameFromPath(path);
-    if (isZip) {
-        QString assetFolder = zipFile.section("/", -1);
-        assetFolder.remove(".zip");
-        mapping = "/" + assetFolder + "/" + filename;
-    } else if (isBlocks) {
-        qCDebug(interfaceapp) << "Path to asset folder: " << zipFile;
-        QString assetFolder = zipFile.section('/', -1);
-        assetFolder.remove(".zip?noDownload=false");
-        mapping = "/" + assetFolder + "/" + filename;
+    if (isZip || isBlocks) {
+        QString assetName = zipFile.section("/", -1).remove(QRegExp("[.]zip(.*)$"));
+        QString assetFolder = path.section("model_repo/", -1);
+        mapping = "/" + assetName + "/" + assetFolder;
     } else {
         mapping = "/" + filename;
     }
@@ -6749,8 +6738,10 @@ void Application::handleUnzip(QString zipFile, QStringList unzipFile, bool autoA
     if (autoAdd) {
         if (!unzipFile.isEmpty()) {
             for (int i = 0; i < unzipFile.length(); i++) {
-                qCDebug(interfaceapp) << "Preparing file for asset server: " << unzipFile.at(i);
-                addAssetToWorld(unzipFile.at(i), zipFile, isZip, isBlocks);
+                if (QFileInfo(unzipFile.at(i)).isFile()) {
+                    qCDebug(interfaceapp) << "Preparing file for asset server: " << unzipFile.at(i);
+                    addAssetToWorld(unzipFile.at(i), zipFile, isZip, isBlocks);
+                }
             }
         } else {
             addAssetToWorldUnzipFailure(zipFile);
@@ -6810,6 +6801,10 @@ void Application::loadScriptURLDialog() const {
             DependencyManager::get<ScriptEngines>()->loadScript(newScript.trimmed());
         }
     });
+}
+
+SharedSoundPointer Application::getSampleSound() const {
+    return _sampleSound;
 }
 
 void Application::loadLODToolsDialog() {
@@ -7104,6 +7099,7 @@ DisplayPluginPointer Application::getActiveDisplayPlugin() const {
     return _displayPlugin;
 }
 
+static const char* EXCLUSION_GROUP_KEY = "exclusionGroup";
 
 static void addDisplayPluginToMenu(DisplayPluginPointer displayPlugin, bool active = false) {
     auto menu = Menu::getInstance();
@@ -7139,6 +7135,8 @@ static void addDisplayPluginToMenu(DisplayPluginPointer displayPlugin, bool acti
     action->setCheckable(true);
     action->setChecked(active);
     displayPluginGroup->addAction(action);
+
+    action->setProperty(EXCLUSION_GROUP_KEY, QVariant::fromValue(displayPluginGroup));
     Q_ASSERT(menu->menuItemExists(MenuOption::OutputMenu, name));
 }
 
@@ -7293,6 +7291,10 @@ void Application::updateDisplayMode() {
         menu->setIsOptionChecked(MenuOption::FirstPerson, true);
         cameraMenuChanged();
     }
+    
+    // Remove the mirror camera option from menu if in HMD mode
+    auto mirrorAction = menu->getActionForOption(MenuOption::FullscreenMirror);
+    mirrorAction->setVisible(!isHmd);
 
     Q_ASSERT_X(_displayPlugin, "Application::updateDisplayMode", "could not find an activated display plugin");
 }
@@ -7432,51 +7434,6 @@ bool Application::makeRenderingContextCurrent() {
 
 bool Application::isForeground() const {
     return _isForeground && !_window->isMinimized();
-}
-
-void Application::sendMousePressOnEntity(QUuid id, PointerEvent event) {
-    EntityItemID entityItemID(id);
-    emit getEntities()->mousePressOnEntity(entityItemID, event);
-}
-
-void Application::sendMouseMoveOnEntity(QUuid id, PointerEvent event) {
-    EntityItemID entityItemID(id);
-    emit getEntities()->mouseMoveOnEntity(entityItemID, event);
-}
-
-void Application::sendMouseReleaseOnEntity(QUuid id, PointerEvent event) {
-    EntityItemID entityItemID(id);
-    emit getEntities()->mouseReleaseOnEntity(entityItemID, event);
-}
-
-void Application::sendClickDownOnEntity(QUuid id, PointerEvent event) {
-    EntityItemID entityItemID(id);
-    emit getEntities()->clickDownOnEntity(entityItemID, event);
-}
-
-void Application::sendHoldingClickOnEntity(QUuid id, PointerEvent event) {
-    EntityItemID entityItemID(id);
-    emit getEntities()->holdingClickOnEntity(entityItemID, event);
-}
-
-void Application::sendClickReleaseOnEntity(QUuid id, PointerEvent event) {
-    EntityItemID entityItemID(id);
-    emit getEntities()->clickReleaseOnEntity(entityItemID, event);
-}
-
-void Application::sendHoverEnterEntity(QUuid id, PointerEvent event) {
-    EntityItemID entityItemID(id);
-    emit getEntities()->hoverEnterEntity(entityItemID, event);
-}
-
-void Application::sendHoverOverEntity(QUuid id, PointerEvent event) {
-    EntityItemID entityItemID(id);
-    emit getEntities()->hoverOverEntity(entityItemID, event);
-}
-
-void Application::sendHoverLeaveEntity(QUuid id, PointerEvent event) {
-    EntityItemID entityItemID(id);
-    emit getEntities()->hoverLeaveEntity(entityItemID, event);
 }
 
 // FIXME?  perhaps two, one for the main thread and one for the offscreen UI rendering thread?

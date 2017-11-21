@@ -24,7 +24,11 @@
 #include <QtCore/QThread>
 #include <QtCore/QMutex>
 #include <QtCore/QWaitCondition>
+#include <QtMultimedia/QMediaService>
+#include <QtMultimedia/QAudioOutputSelectorControl>
+#include <QtMultimedia/QMediaPlayer>
 
+#include <AudioClient.h>
 #include <shared/NsightHelpers.h>
 #include <shared/GlobalAppProperties.h>
 #include <shared/QtHelpers.h>
@@ -112,6 +116,69 @@ uint64_t uvec2ToUint64(const uvec2& v) {
     result |= v.y;
     return result;
 }
+
+// Class to handle changing QML audio output device using another thread
+class AudioHandler : public QObject, QRunnable {
+    Q_OBJECT
+public:
+    AudioHandler(QObject* container, const QString& deviceName, int runDelayMs = 0, QObject* parent = nullptr) : QObject(parent) {
+        _container = container;
+        _newTargetDevice = deviceName;
+        _runDelayMs = runDelayMs;
+        setAutoDelete(true);
+        QThreadPool::globalInstance()->start(this);
+    }
+    virtual ~AudioHandler() {
+        qDebug() << "Audio Handler Destroyed";
+    }
+    void run() override {
+        if (_newTargetDevice.isEmpty()) {
+            return;
+        }
+        if (_runDelayMs > 0) {
+            QThread::msleep(_runDelayMs);
+        }
+        auto audioIO = DependencyManager::get<AudioClient>();
+        QString deviceName = audioIO->getActiveAudioDevice(QAudio::AudioOutput).deviceName();
+        for (auto player : _container->findChildren<QMediaPlayer*>()) {
+            auto mediaState = player->state();
+            QMediaService *svc = player->service();
+            if (nullptr == svc) {
+                return;
+            }
+            QAudioOutputSelectorControl *out = qobject_cast<QAudioOutputSelectorControl *>
+                (svc->requestControl(QAudioOutputSelectorControl_iid));
+            if (nullptr == out) {
+                return;
+            }
+            QString deviceOuput;
+            auto outputs = out->availableOutputs();
+            for (int i = 0; i < outputs.size(); i++) {
+                QString output = outputs[i];
+                QString description = out->outputDescription(output);
+                if (description == deviceName) {
+                    deviceOuput = output;
+                    break;
+                }
+            }
+            out->setActiveOutput(deviceOuput);
+            svc->releaseControl(out);
+            // if multimedia was paused, it will start playing automatically after changing audio device
+            // this will reset it back to a paused state
+            if (mediaState == QMediaPlayer::State::PausedState) {
+                player->pause();
+            } else if (mediaState == QMediaPlayer::State::StoppedState) {
+                player->stop();
+            }
+        }
+        qDebug() << "QML Audio changed to " << deviceName;
+    }
+
+private:
+    QString _newTargetDevice;
+    QObject* _container;
+    int _runDelayMs;
+};
 
 class OffscreenTextures {
 public:
@@ -595,6 +662,14 @@ void OffscreenQmlSurface::create() {
     // Find a way to flag older scripts using this mechanism and wanr that this is deprecated
     _qmlContext->setContextProperty("eventBridgeWrapper", new EventBridgeWrapper(this, _qmlContext));
     _renderControl->initialize(_canvas->getContext());
+    
+    // Connect with the audio client and listen for audio device changes
+    auto audioIO = DependencyManager::get<AudioClient>();
+    connect(audioIO.data(), &AudioClient::deviceChanged, this, [&](QAudio::Mode mode, const QAudioDeviceInfo& device) {
+        if (mode == QAudio::Mode::AudioOutput) {
+            QMetaObject::invokeMethod(this, "changeAudioOutputDevice", Qt::QueuedConnection, Q_ARG(QString, device.deviceName()));
+        }
+    });
 
     // When Quick says there is a need to render, we will not render immediately. Instead,
     // a timer with a small interval is used to get better performance.
@@ -603,6 +678,32 @@ void OffscreenQmlSurface::create() {
     _updateTimer.setTimerType(Qt::PreciseTimer);
     _updateTimer.setInterval(MIN_TIMER_MS); // 5ms, Qt::PreciseTimer required
     _updateTimer.start();
+}
+
+void OffscreenQmlSurface::changeAudioOutputDevice(const QString& deviceName, bool isHtmlUpdate) {
+    if (_rootItem != nullptr && !isHtmlUpdate) {
+        QMetaObject::invokeMethod(this, "forceQmlAudioOutputDeviceUpdate", Qt::QueuedConnection);
+    }
+    emit audioOutputDeviceChanged(deviceName);
+}
+
+void OffscreenQmlSurface::forceHtmlAudioOutputDeviceUpdate() {
+    auto audioIO = DependencyManager::get<AudioClient>();
+    QString deviceName = audioIO->getActiveAudioDevice(QAudio::AudioOutput).deviceName();
+    QMetaObject::invokeMethod(this, "changeAudioOutputDevice", Qt::QueuedConnection,
+        Q_ARG(QString, deviceName), Q_ARG(bool, true));
+}
+
+void OffscreenQmlSurface::forceQmlAudioOutputDeviceUpdate() {
+    if (QThread::currentThread() != qApp->thread()) {
+        QMetaObject::invokeMethod(this, "forceQmlAudioOutputDeviceUpdate", Qt::QueuedConnection);
+    } else {
+        auto audioIO = DependencyManager::get<AudioClient>();
+        QString deviceName = audioIO->getActiveAudioDevice(QAudio::AudioOutput).deviceName();
+        int waitForAudioQmlMs = 500;
+        // The audio device need to be change using oth
+        new AudioHandler(_rootItem, deviceName, waitForAudioQmlMs);        
+    }
 }
 
 static uvec2 clampSize(const uvec2& size, uint32_t maxDimension) {
@@ -798,6 +899,7 @@ void OffscreenQmlSurface::finishQmlLoad(QQmlComponent* qmlComponent, QQmlContext
         if (newItem) {
             newItem->setParentItem(_rootItem);
         }
+        QMetaObject::invokeMethod(this, "forceQmlAudioOutputDeviceUpdate", Qt::QueuedConnection);
         return;
     }
 
@@ -817,6 +919,7 @@ void OffscreenQmlSurface::finishQmlLoad(QQmlComponent* qmlComponent, QQmlContext
     for (const auto& callback : callbacks) {
         callback(qmlContext, newObject);
     }
+    QMetaObject::invokeMethod(this, "forceQmlAudioOutputDeviceUpdate", Qt::QueuedConnection);
 }
 
 void OffscreenQmlSurface::updateQuick() {
@@ -1038,6 +1141,7 @@ static const uint8_t BACKSPACE_SYMBOL[] = { 0xE2, 0x86, 0x90, 0x00 };
 static const uint8_t LEFT_ARROW[] = { 0xE2, 0x9D, 0xAC, 0x00 };
 static const uint8_t RIGHT_ARROW[] = { 0xE2, 0x9D, 0xAD, 0x00 };
 static const uint8_t RETURN_SYMBOL[] = { 0xE2, 0x8F, 0x8E, 0x00 };
+static const uint8_t COLLAPSE_KEYBOARD[] = { 0xEE, 0x80, 0xAB, 0x00 };
 static const char PUNCTUATION_STRING[] = "123";
 static const char ALPHABET_STRING[] = "abc";
 
@@ -1061,6 +1165,9 @@ void OffscreenQmlSurface::synthesizeKeyPress(QString key, QObject* targetOverrid
         if (equals(utf8Key, SHIFT_ARROW) || equals(utf8Key, NUMERIC_SHIFT_ARROW) ||
             equals(utf8Key, (uint8_t*)PUNCTUATION_STRING) || equals(utf8Key, (uint8_t*)ALPHABET_STRING)) {
             return;  // ignore
+        } else if (equals(utf8Key, COLLAPSE_KEYBOARD)) {
+            lowerKeyboard();
+            return;
         } else if (equals(utf8Key, BACKSPACE_SYMBOL)) {
             scanCode = Qt::Key_Backspace;
             keyString = "\x08";
@@ -1082,37 +1189,19 @@ void OffscreenQmlSurface::synthesizeKeyPress(QString key, QObject* targetOverrid
     }
 }
 
-static void forEachKeyboard(QQuickItem* parent, std::function<void(QQuickItem*)> function) {
-    if (!function) {
-        return;
-    }
+void OffscreenQmlSurface::lowerKeyboard() {
 
-    auto keyboards = parent->findChildren<QObject*>("keyboard");
+    QSignalBlocker blocker(_quickWindow);
 
-    for (auto keyboardObject : keyboards) {
-        auto keyboard = qobject_cast<QQuickItem*>(keyboardObject);
-        if (keyboard) {
-            function(keyboard);
-        }
+    if (_currentFocusItem) {
+        _currentFocusItem->setFocus(false);
+        setKeyboardRaised(_currentFocusItem, false);
     }
 }
 
-static const int TEXTINPUT_PASSWORD = 2;
+void OffscreenQmlSurface::setKeyboardRaised(QObject* object, bool raised, bool numeric, bool passwordField) {
+    qCDebug(uiLogging) << "setKeyboardRaised: " << object << ", raised: " << raised << ", numeric: " << numeric << ", password: " << passwordField;
 
-static QQuickItem* getTopmostParent(QQuickItem* item) {
-    QObject* itemObject = item;
-    while (itemObject) {
-        if (itemObject->parent()) {
-            itemObject = itemObject->parent();
-        } else {
-            break;
-        }
-    }
-
-    return qobject_cast<QQuickItem*> (itemObject);
-}
-
-void OffscreenQmlSurface::setKeyboardRaised(QObject* object, bool raised, bool numeric) {
 #if Q_OS_ANDROID
     return;
 #endif
@@ -1128,21 +1217,6 @@ void OffscreenQmlSurface::setKeyboardRaised(QObject* object, bool raised, bool n
             return;
         }
 
-        auto echoMode = item->property("echoMode");
-        bool isPasswordField = echoMode.isValid() && echoMode.toInt() == TEXTINPUT_PASSWORD;
-
-        // we need to somehow pass 'isPasswordField' to visible keyboard so it will change its 'mirror text' to asterixes
-        // the issue in some cases there might be more than one keyboard in object tree and it is hard to understand which one is being used at the moment
-        // unfortunately attempts to check for visibility failed becuase visibility is not updated yet. So... I don't see other way than just update properties for all the keyboards
-
-        auto topmostParent = getTopmostParent(item);
-        if (topmostParent) {
-            forEachKeyboard(topmostParent, [&](QQuickItem* keyboard) {
-                keyboard->setProperty("mirroredText", QVariant::fromValue(QString("")));
-                keyboard->setProperty("password", isPasswordField);
-            });
-        }
-
         // for future probably makes sense to consider one of the following:
         // 1. make keyboard a singleton, which will be dynamically re-parented before showing
         // 2. track currently visible keyboard somewhere, allow to subscribe for this signal
@@ -1153,15 +1227,19 @@ void OffscreenQmlSurface::setKeyboardRaised(QObject* object, bool raised, bool n
             numeric = numeric || QString(item->metaObject()->className()).left(7) == "SpinBox";
 
             if (item->property("keyboardRaised").isValid()) {
-                forEachKeyboard(item, [&](QQuickItem* keyboard) {
-                    keyboard->setProperty("mirroredText", QVariant::fromValue(QString("")));
-                    keyboard->setProperty("password", isPasswordField);
-                });
 
                 // FIXME - HMD only: Possibly set value of "keyboardEnabled" per isHMDMode() for use in WebView.qml.
                 if (item->property("punctuationMode").isValid()) {
                     item->setProperty("punctuationMode", QVariant(numeric));
                 }
+                if (item->property("passwordField").isValid()) {
+                    item->setProperty("passwordField", QVariant(passwordField));
+                }
+
+                if (raised) {
+                    item->setProperty("keyboardRaised", QVariant(!raised));
+                }
+
                 item->setProperty("keyboardRaised", QVariant(raised));
                 return;
             }
@@ -1186,9 +1264,13 @@ void OffscreenQmlSurface::emitWebEvent(const QVariant& message) {
         const QString RAISE_KEYBOARD = "_RAISE_KEYBOARD";
         const QString RAISE_KEYBOARD_NUMERIC = "_RAISE_KEYBOARD_NUMERIC";
         const QString LOWER_KEYBOARD = "_LOWER_KEYBOARD";
+        const QString RAISE_KEYBOARD_NUMERIC_PASSWORD = "_RAISE_KEYBOARD_NUMERIC_PASSWORD";
+        const QString RAISE_KEYBOARD_PASSWORD = "_RAISE_KEYBOARD_PASSWORD";
         QString messageString = message.type() == QVariant::String ? message.toString() : "";
         if (messageString.left(RAISE_KEYBOARD.length()) == RAISE_KEYBOARD) {
-            setKeyboardRaised(_currentFocusItem, true, messageString == RAISE_KEYBOARD_NUMERIC);
+            bool numeric = (messageString == RAISE_KEYBOARD_NUMERIC || messageString == RAISE_KEYBOARD_NUMERIC_PASSWORD);
+            bool passwordField = (messageString == RAISE_KEYBOARD_PASSWORD || messageString == RAISE_KEYBOARD_NUMERIC_PASSWORD);
+            setKeyboardRaised(_currentFocusItem, true, numeric, passwordField);
         } else if (messageString == LOWER_KEYBOARD) {
             setKeyboardRaised(_currentFocusItem, false);
         } else {

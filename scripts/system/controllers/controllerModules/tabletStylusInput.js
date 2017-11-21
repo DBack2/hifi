@@ -154,6 +154,25 @@ Script.include("/~/system/libraries/controllers.js");
 
         this.showStylus = function() {
             if (this.stylus) {
+                var X_ROT_NEG_90 = { x: -0.70710678, y: 0, z: 0, w: 0.70710678 };
+                var modelOrientation = Quat.multiply(this.stylusTip.orientation, X_ROT_NEG_90);
+                var modelOrientationAngles = Quat.safeEulerAngles(modelOrientation);
+
+                var rotation = Overlays.getProperty(this.stylus, "rotation");
+                var rotationAngles = Quat.safeEulerAngles(rotation);
+
+                if(!Vec3.withinEpsilon(modelOrientationAngles, rotationAngles, 1)) {
+                    var modelPositionOffset = Vec3.multiplyQbyV(modelOrientation, { x: 0, y: 0, z: MyAvatar.sensorToWorldScale * -WEB_STYLUS_LENGTH / 2 });
+
+                    var updatedStylusProperties = { 
+                        position: Vec3.sum(this.stylusTip.position, modelPositionOffset),
+                        rotation: modelOrientation,
+                        dimensions: Vec3.multiply(MyAvatar.sensorToWorldScale, { x: 0.01, y: 0.01, z: WEB_STYLUS_LENGTH }),
+                    };
+
+                    Overlays.editOverlay(this.stylus, updatedStylusProperties);
+                }
+
                 return;
             }
 
@@ -251,11 +270,14 @@ Script.include("/~/system/libraries/controllers.js");
         this.otherModuleNeedsToRun = function(controllerData) {
             var grabOverlayModuleName = this.hand === RIGHT_HAND ? "RightNearParentingGrabOverlay" : "LeftNearParentingGrabOverlay";
             var grabOverlayModule = getEnabledModuleByName(grabOverlayModuleName);
+            var grabEntityModuleName = this.hand === RIGHT_HAND ? "RightNearParentingGrabEntity" : "LeftNearParentingGrabEntity";
+            var grabEntityModule = getEnabledModuleByName(grabEntityModuleName);
             var grabOverlayModuleReady = grabOverlayModule ? grabOverlayModule.isReady(controllerData) : makeRunningValues(false, [], []);
+            var grabEntityModuleReady = grabEntityModule ? grabEntityModule.isReady(controllerData) : makeRunningValues(false, [], []);
             var farGrabModuleName = this.hand === RIGHT_HAND ? "RightFarActionGrabEntity" : "LeftFarActionGrabEntity";
             var farGrabModule = getEnabledModuleByName(farGrabModuleName);
             var farGrabModuleReady = farGrabModule ? farGrabModule.isReady(controllerData) : makeRunningValues(false, [], []);
-            return grabOverlayModuleReady.active || farGrabModuleReady.active;
+            return grabOverlayModuleReady.active || farGrabModuleReady.active || grabEntityModuleReady.active;
         };
 
         this.processStylus = function(controllerData) {
