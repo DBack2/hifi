@@ -2186,13 +2186,14 @@ void Application::initializeGL() {
     // Set up the render engine
     render::CullFunctor cullFunctor = LODManager::shouldRender;
     static const QString RENDER_FORWARD = "HIFI_RENDER_FORWARD";
+    static const int MIRROR_RENDER_JOBS = 3;
     bool isDeferred = !QProcessEnvironment::systemEnvironment().contains(RENDER_FORWARD);
     _renderEngine->addJob<UpdateSceneTask>("UpdateScene");
     _renderEngine->addJob<SecondaryCameraRenderTask>("SecondaryCameraJob", cullFunctor);
-    for (int i = 0; i < 1; ++i) {
-        _renderEngine->addJob<MirrorCameraRenderTask>("MirrorCameraJob", cullFunctor, i);
+    for (int i = 0; i < MIRROR_RENDER_JOBS; ++i) {
+        _renderEngine->addJob<MirrorCameraRenderTask>("MirrorCameraJob" + i, cullFunctor, i);
     }
-    _mirrorCameras.setRenderJobs(1);
+    _mirrorCameras.setRenderJobs(MIRROR_RENDER_JOBS);
     _renderEngine->addJob<RenderViewTask>("RenderMainView", cullFunctor, isDeferred);
     _renderEngine->load();
     _renderEngine->registerScene(_main3DScene);

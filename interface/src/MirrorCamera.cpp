@@ -26,7 +26,7 @@ public:
     }
 
     void configure(const Config& config) {
-        //_entityID = config.entityID;
+        _entityID = config.getEntityID();
     }
 
     void run(const render::RenderContextPointer& renderContext, RenderArgsPointer& cachedArgs) {
@@ -46,8 +46,8 @@ public:
         glm::vec3 mirrorPropertiesDimensions = entityProperties.getDimensions();
         glm::vec3 halfMirrorPropertiesDimensions = 0.5f * mirrorPropertiesDimensions;
 
-        float textureWidth = 1024 * mirrorPropertiesDimensions.x;
-        float textureHeight = 1024 * mirrorPropertiesDimensions.y;
+        float textureWidth = TextureCache::DEFAULT_MIRROR_CAM_RESOLUTION * mirrorPropertiesDimensions.x;
+        float textureHeight = TextureCache::DEFAULT_MIRROR_CAM_RESOLUTION * mirrorPropertiesDimensions.y;
 
         destFramebuffer = textureCache->getMirrorCameraFramebuffer(_entityID, textureWidth, textureHeight);
         if (destFramebuffer) {
@@ -125,7 +125,7 @@ public:
 };
 
 void MirrorCameraRenderTask::build(JobModel& task, const render::Varying& inputs, render::Varying& outputs, render::CullFunctor cullFunctor, int jobIndex) {
-    const auto cachedArg = task.addJob<MirrorCameraJob>("MirrorCamera");
+    const auto cachedArg = task.addJob<MirrorCameraJob>("MirrorCamera" + jobIndex);
     const auto items = task.addJob<RenderFetchCullSortTask>("FetchCullSort", cullFunctor);
     assert(items.canCast<RenderFetchCullSortTask::Output>());
     task.addJob<RenderDeferredTask>("RenderDeferredTask", items);
@@ -135,15 +135,20 @@ void MirrorCameraRenderTask::build(JobModel& task, const render::Varying& inputs
 MirrorCamera::MirrorCamera(const QUuid& entityID, int renderJobIndex)
     :_entityID(entityID),
     _renderJobIndex(renderJobIndex) {
-    MirrorCameraJobConfig* jobConfig = qobject_cast<MirrorCameraJobConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCamera"));
-    jobConfig->entityID = _entityID;
+    MirrorCameraJobConfig* jobConfig = qobject_cast<MirrorCameraJobConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCamera" + _renderJobIndex));
+    jobConfig->setEntityID(_entityID);
     jobConfig->setEnabled(true);
-    qobject_cast<MirrorCameraRenderTaskConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCameraJob"))->setEnabled(true);
+    qobject_cast<MirrorCameraRenderTaskConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCameraJob" + _renderJobIndex))->setEnabled(true);
 }
 
 MirrorCamera::~MirrorCamera() {
-    MirrorCameraJobConfig* jobConfig = qobject_cast<MirrorCameraJobConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCamera"));
-    jobConfig->entityID = QUuid();
+    MirrorCameraJobConfig* jobConfig = qobject_cast<MirrorCameraJobConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCamera" + _renderJobIndex));
+    jobConfig->setEntityID(QUuid());
     jobConfig->setEnabled(false);
-    qobject_cast<MirrorCameraRenderTaskConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCameraJob"))->setEnabled(false);
+    qobject_cast<MirrorCameraRenderTaskConfig*>(qApp->getRenderEngine()->getConfiguration()->getConfig("MirrorCameraJob" + _renderJobIndex))->setEnabled(false);
+}
+
+void MirrorCameraJobConfig::setEntityID(const QUuid& entityID) {
+    _entityID = entityID;
+    emit dirty();
 }

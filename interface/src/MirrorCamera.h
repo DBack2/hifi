@@ -21,9 +21,16 @@ class MirrorCameraJob;
 class MirrorCameraJobConfig : public render::Task::Config { // Exposes secondary camera parameters to JavaScript.
     Q_OBJECT
 public:
-    QUuid entityID;
-
     MirrorCameraJobConfig() : render::Task::Config(false) {}
+
+    void setEntityID(const QUuid& entityID);
+    const QUuid& getEntityID() const { return _entityID; }
+
+signals:
+    void dirty();
+
+private:
+    QUuid _entityID;
 };
 
 class MirrorCameraRenderTaskConfig : public render::Task::Config {
@@ -46,14 +53,12 @@ public:
     MirrorCamera(const QUuid& entityID, int renderJobIndex);
     ~MirrorCamera();
 
-    void markForDelete() { _markedForDelete = true; }
-    bool markedForDelete() const { return _markedForDelete; }
+    const QUuid& getEntityID() const { return _entityID; }
     int getRenderJobIndex() const { return _renderJobIndex;  }
 
 private:
     QUuid _entityID;
     int _renderJobIndex{ -1 };
-    bool _markedForDelete{ false };
 };
 
 #endif // hifi_MirrorCamera_h

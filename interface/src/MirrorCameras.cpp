@@ -9,66 +9,67 @@
 //
 
 #include "MirrorCameras.h"
-#include "UUID.h"
+#include "avatar/AvatarManager.h"
+#include <EntityScriptingInterface.h>
 
 MirrorCameras::~MirrorCameras() {
-    QWriteLocker writeLocker{ &_camerasLock };
     for (auto& camera : _cameras) {
         delete camera;
     }
     _cameras.clear();
-    writeLocker.unlock();
 }
 
 void MirrorCameras::addCamera(const QUuid& entityID) {
-    QWriteLocker writeLocker { &_camerasLock };
-    
-    int renderJob = getAvailableRenderJob();
-    if (renderJob == -1) {
+    if (_cameras.contains(entityID)) {
         return;
     }
-
-    if (!_cameras.contains(entityID)) {
-        _cameras[entityID] = new MirrorCamera(entityID, renderJob);
+    int renderJob = getAvailableRenderJob();
+    if (renderJob == -1) {
+        renderJob = claimFurthestMirrorRenderJob();
     }
-
-    writeLocker.unlock();
+    _cameras[entityID] = new MirrorCamera(entityID, renderJob);
 }
 
 void MirrorCameras::removeCamera(const QUuid& entityID) {
-    QWriteLocker writeLocker{ &_camerasLock };
     auto iter = _cameras.find(entityID);
     if (iter != _cameras.end()) {
         MirrorCamera* camera = (*iter);
-        _cameraRenderJobs[camera->getRenderJobIndex()] = false;
+        _availableRenderJobs[camera->getRenderJobIndex()] = false;
         _cameras.erase(iter);
         delete camera;
-        //MirrorCamera* camera = (*iter);
-        //camera->markForDelete();
     }
-    writeLocker.unlock();
-}
-
-void MirrorCameras::deleteCameras() {
-    QWriteLocker writeLocker{ &_camerasLock };
-    for (auto& iter = _cameras.begin(); iter != _cameras.end();) {
-        MirrorCamera* camera = (*iter);
-        if (camera->markedForDelete()) {
-            iter = _cameras.erase(iter);
-            delete camera;
-        } else {
-            ++iter;
-        }
-    }
-    writeLocker.unlock();
 }
 
 int MirrorCameras::getAvailableRenderJob() {
-    for (int i = 0; i < _cameraRenderJobs.size(); ++i) {
-        if (!_cameraRenderJobs[i]) {
-            _cameraRenderJobs[i] = true;
+    for (int i = 0; i < _availableRenderJobs.size(); ++i) {
+        if (!_availableRenderJobs[i]) {
+            _availableRenderJobs[i] = true;
             return i;
         }
     }
     return -1;
+}
+
+int MirrorCameras::claimFurthestMirrorRenderJob() {
+    glm::vec3 avatarPosition = DependencyManager::get<AvatarManager>()->getMyAvatar()->getPosition();
+
+    float maxDistance = 0.0f;
+    QUuid maxDistanceEntityID;
+    for (auto& camera : _cameras) {
+        const QUuid& entityID = camera->getEntityID();
+        EntityPropertyFlags entityPropFlags;
+        EntityItemProperties entityProperties = DependencyManager::get<EntityScriptingInterface>()->getEntityProperties(entityID, entityPropFlags);
+        glm::vec3 mirrorPosition = entityProperties.getPosition();
+        float distance = glm::distance(mirrorPosition, avatarPosition);
+        if (distance > maxDistance) {
+            maxDistance = distance;
+            maxDistanceEntityID = entityID;
+        }
+    }
+
+    int renderJobIndex = _cameras[maxDistanceEntityID]->getRenderJobIndex();
+    removeCamera(maxDistanceEntityID);
+    _availableRenderJobs[renderJobIndex] = true;
+
+    return renderJobIndex;
 }

@@ -20,8 +20,7 @@ public:
     MirrorCameras() {};
     ~MirrorCameras();
 
-    void deleteCameras();
-    void setRenderJobs(int numJobs) { _cameraRenderJobs.resize(numJobs); }
+    void setRenderJobs(int numJobs) { _availableRenderJobs.resize(numJobs); }
 
 public slots:
     void addCamera(const QUuid& entityID);
@@ -29,10 +28,10 @@ public slots:
 
 private:
     int getAvailableRenderJob();
+    int claimFurthestMirrorRenderJob();
 
-    QReadWriteLock _camerasLock;
     QHash<QUuid, MirrorCamera*> _cameras;
-    std::vector<bool> _cameraRenderJobs;
+    std::vector<bool> _availableRenderJobs;
 };
 
 #endif // hifi_MirrorCameras_h

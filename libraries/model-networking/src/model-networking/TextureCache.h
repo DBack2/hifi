@@ -176,6 +176,7 @@ public:
 
     static const int DEFAULT_SPECTATOR_CAM_WIDTH { 2048 };
     static const int DEFAULT_SPECTATOR_CAM_HEIGHT { 1024 };
+    static const int DEFAULT_MIRROR_CAM_RESOLUTION { 1024 };
 
 signals:
     void spectatorCameraFramebufferReset();
