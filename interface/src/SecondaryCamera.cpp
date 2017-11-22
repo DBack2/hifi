@@ -49,47 +49,6 @@ public:
         _farClipPlaneDistance = config.farClipPlaneDistance;
         _textureWidth = config.textureWidth;
         _textureHeight = config.textureHeight;
-        _mirrorProjection = config.mirrorProjection;  
-    }
-
-    void setMirrorProjection(ViewFrustum& srcViewFrustum) {
-        if (_attachedEntityId.isNull()) {
-            qWarning() << "ERROR: Cannot set mirror projection for SecondaryCamera without an attachedEntityId set.";
-            return;
-        }
-       
-        EntityItemProperties entityProperties = _entityScriptingInterface->getEntityProperties(_attachedEntityId, 
-                                                                                               _attachedEntityPropertyFlags);
-        glm::vec3 mirrorPropertiesPosition = entityProperties.getPosition();
-        glm::quat mirrorPropertiesRotation = entityProperties.getRotation();
-        glm::vec3 mirrorPropertiesDimensions = entityProperties.getDimensions();
-        glm::vec3 halfMirrorPropertiesDimensions = 0.5f * mirrorPropertiesDimensions;
-
-        // setup mirror from world as inverse of world from mirror transformation using inverted x and z for mirrored image
-        // TODO: we are assuming here that UP is world y-axis
-        glm::mat4 worldFromMirrorRotation = glm::mat4_cast(mirrorPropertiesRotation) * glm::scale(vec3(-1.0f, 1.0f, -1.0f));
-        glm::mat4 worldFromMirrorTranslation = glm::translate(mirrorPropertiesPosition);
-        glm::mat4 worldFromMirror = worldFromMirrorTranslation * worldFromMirrorRotation;
-        glm::mat4 mirrorFromWorld = glm::inverse(worldFromMirror);
-
-        // get mirror camera position by reflecting main camera position's z coordinate in mirror space
-        glm::vec3 mainCameraPositionWorld = qApp->getCamera().getPosition();
-        glm::vec3 mainCameraPositionMirror = vec3(mirrorFromWorld * vec4(mainCameraPositionWorld, 1.0f));
-        glm::vec3 mirrorCameraPositionMirror = vec3(mainCameraPositionMirror.x, mainCameraPositionMirror.y, 
-                                                    -mainCameraPositionMirror.z);
-        glm::vec3 mirrorCameraPositionWorld = vec3(worldFromMirror * vec4(mirrorCameraPositionMirror, 1.0f));
-
-        // set frustum position to be mirrored camera and set orientation to mirror's adjusted rotation
-        glm::quat mirrorCameraOrientation = glm::quat_cast(worldFromMirrorRotation);
-        srcViewFrustum.setPosition(mirrorCameraPositionWorld);
-        srcViewFrustum.setOrientation(mirrorCameraOrientation);
-
-        // build frustum using mirror space translation of mirrored camera
-        float nearClip = mirrorCameraPositionMirror.z + mirrorPropertiesDimensions.z * 2.0f;
-        glm::vec3 upperRight = halfMirrorPropertiesDimensions - mirrorCameraPositionMirror;
-        glm::vec3 bottomLeft = -halfMirrorPropertiesDimensions - mirrorCameraPositionMirror;
-        glm::mat4 frustum = glm::frustum(bottomLeft.x, upperRight.x, bottomLeft.y, upperRight.y, nearClip, _farClipPlaneDistance);
-        srcViewFrustum.setProjection(frustum);
     }
 
     void run(const render::RenderContextPointer& renderContext, RenderArgsPointer& cachedArgs) {
@@ -113,22 +72,18 @@ public:
             });
 
             auto srcViewFrustum = args->getViewFrustum();
-            if (_mirrorProjection) {
-                setMirrorProjection(srcViewFrustum);
+            if (!_attachedEntityId.isNull()) {
+                EntityItemProperties entityProperties = _entityScriptingInterface->getEntityProperties(_attachedEntityId, 
+                                                        _attachedEntityPropertyFlags);
+                srcViewFrustum.setPosition(entityProperties.getPosition());
+                srcViewFrustum.setOrientation(entityProperties.getRotation());
             } else {
-                if (!_attachedEntityId.isNull()) {
-                    EntityItemProperties entityProperties = _entityScriptingInterface->getEntityProperties(_attachedEntityId, 
-                                                            _attachedEntityPropertyFlags);
-                    srcViewFrustum.setPosition(entityProperties.getPosition());
-                    srcViewFrustum.setOrientation(entityProperties.getRotation());
-                } else {
-                    srcViewFrustum.setPosition(_position);
-                    srcViewFrustum.setOrientation(_orientation);
-                }
-                srcViewFrustum.setProjection(glm::perspective(glm::radians(_vFoV), 
-                                            ((float)args->_viewport.z / (float)args->_viewport.w), 
-                                            _nearClipPlaneDistance, _farClipPlaneDistance));
+                srcViewFrustum.setPosition(_position);
+                srcViewFrustum.setOrientation(_orientation);
             }
+            srcViewFrustum.setProjection(glm::perspective(glm::radians(_vFoV), 
+                                         ((float)args->_viewport.z / (float)args->_viewport.w), 
+                                        _nearClipPlaneDistance, _farClipPlaneDistance));
             // Without calculating the bound planes, the secondary camera will use the same culling frustum as the main camera,
             // which is not what we want here.
             srcViewFrustum.calculate();
@@ -150,7 +105,6 @@ private:
     float _farClipPlaneDistance;
     int _textureWidth;
     int _textureHeight;
-    bool _mirrorProjection;
     EntityPropertyFlags _attachedEntityPropertyFlags;
     QSharedPointer<EntityScriptingInterface> _entityScriptingInterface;
 };

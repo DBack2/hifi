@@ -148,7 +148,6 @@ public:
     const Varying getOutput() const { return _concept->getOutput(); }
     QConfigPointer& getConfiguration() const { return _concept->getConfiguration(); }
     void applyConfiguration() { return _concept->applyConfiguration(); }
-    const std::string& getName() const { return _name; }
 
     template <class T> T& edit() {
         auto concept = std::static_pointer_cast<typename T::JobModel>(_concept);
