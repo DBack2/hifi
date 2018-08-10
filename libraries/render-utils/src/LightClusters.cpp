@@ -561,34 +561,47 @@ void LightClusteringPass::configure(const Config& config) {
 }
 
 void LightClusteringPass::run(const render::RenderContextPointer& renderContext, const Inputs& inputs, Outputs& output) {
+    PROFILE_RANGE(render, "LightClusteringPass::run");
     auto args = renderContext->args;
     
     auto deferredTransform = inputs.get0();
     auto lightingModel = inputs.get1();
     auto surfaceGeometryFramebuffer = inputs.get2();
 
-    // first update the Grid with the new frustum
-    if (!_freeze) {
-        _lightClusters->updateFrustum(args->getViewFrustum());
+    {
+        PROFILE_RANGE(render, "LightClusteringPass::run - _lightClusters->updateFrustum");
+        // first update the Grid with the new frustum
+        if (!_freeze) {
+            _lightClusters->updateFrustum(args->getViewFrustum());
+        }
     }
     
     // From the LightStage and the current frame, update the light cluster Grid
     auto lightStage = renderContext->_scene->getStage<LightStage>();
     assert(lightStage);
-    _lightClusters->updateLightStage(lightStage);
-    _lightClusters->updateLightFrame(lightStage->_currentFrame, lightingModel->isPointLightEnabled(), lightingModel->isSpotLightEnabled());
+    {
+        PROFILE_RANGE(render, "LightClusteringPass::run - _lightClusters->updateLightStage");
+        _lightClusters->updateLightStage(lightStage);
+    }
+    {
+        PROFILE_RANGE(render, "LightClusteringPass::run - _lightClusters->updateLightFrame");
+        _lightClusters->updateLightFrame(lightStage->_currentFrame, lightingModel->isPointLightEnabled(), lightingModel->isSpotLightEnabled());
+    }
     
     auto clusteringStats = _lightClusters->updateClusters();
 
     output = _lightClusters;
 
-    auto config = std::static_pointer_cast<Config>(renderContext->jobConfig);
-    config->numSceneLights = lightStage->getNumLights();
-    config->numFreeSceneLights = lightStage->getNumFreeLights();
-    config->numAllocatedSceneLights = lightStage->getNumAllocatedLights();
-    config->setNumInputLights(clusteringStats.x);
-    config->setNumClusteredLights(clusteringStats.y);
-    config->setNumClusteredLightReferences(clusteringStats.z);
+    {
+        PROFILE_RANGE(render, "LightClusteringPass::run - config");
+        auto config = std::static_pointer_cast<Config>(renderContext->jobConfig);
+        config->numSceneLights = lightStage->getNumLights();
+        config->numFreeSceneLights = lightStage->getNumFreeLights();
+        config->numAllocatedSceneLights = lightStage->getNumAllocatedLights();
+        config->setNumInputLights(clusteringStats.x);
+        config->setNumClusteredLights(clusteringStats.y);
+        config->setNumClusteredLightReferences(clusteringStats.z);
+    }
 }
 
 DebugLightClusters::DebugLightClusters() {

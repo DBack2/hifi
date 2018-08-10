@@ -645,10 +645,13 @@ void OpenGLDisplayPlugin::compositeScene() {
 }
 
 void OpenGLDisplayPlugin::compositeLayers() {
-    updateCompositeFramebuffer();
+    {
+        PROFILE_RANGE_EX(render_detail, "compositeLayers - updateCompositeFramebuffer", 0xff0077ff, (uint64_t)presentCount())
+        updateCompositeFramebuffer();
+    }
 
     {
-        PROFILE_RANGE_EX(render_detail, "compositeScene", 0xff0077ff, (uint64_t)presentCount())
+        PROFILE_RANGE_EX(render_detail, "compositeLayers - compositeScene", 0xff0077ff, (uint64_t)presentCount())
         compositeScene();
     }
 
@@ -656,7 +659,7 @@ void OpenGLDisplayPlugin::compositeLayers() {
     if (false) // do not draw the HUD if running nsight debug
 #endif
     {
-        PROFILE_RANGE_EX(render_detail, "handleHUDBatch", 0xff0077ff, (uint64_t)presentCount())
+        PROFILE_RANGE_EX(render_detail, "compositeLayers - handleHUDBatch", 0xff0077ff, (uint64_t)presentCount())
         auto hudOperator = getHUDOperator();
         withPresentThreadLock([&] {
             _hudOperator = hudOperator;
@@ -664,15 +667,15 @@ void OpenGLDisplayPlugin::compositeLayers() {
     }
 
     {
-        PROFILE_RANGE_EX(render_detail, "compositeExtra", 0xff0077ff, (uint64_t)presentCount())
+        PROFILE_RANGE_EX(render_detail, "compositeLayers - compositeExtra", 0xff0077ff, (uint64_t)presentCount())
         compositeExtra();
     }
 
     // Draw the pointer last so it's on top of everything
     auto compositorHelper = DependencyManager::get<CompositorHelper>();
     if (compositorHelper->getReticleVisible()) {
-        PROFILE_RANGE_EX(render_detail, "compositePointer", 0xff0077ff, (uint64_t)presentCount())
-            compositePointer();
+        PROFILE_RANGE_EX(render_detail, "compositeLayers - compositePointer", 0xff0077ff, (uint64_t)presentCount())
+        compositePointer();
     }
 }
 

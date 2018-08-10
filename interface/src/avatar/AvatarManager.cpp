@@ -149,16 +149,20 @@ float AvatarManager::getAvatarSimulationRate(const QUuid& sessionID, const QStri
 }
 
 void AvatarManager::updateOtherAvatars(float deltaTime) {
-    // lock the hash for read to check the size
-    QReadLocker lock(&_hashLock);
-    if (_avatarHash.size() < 2 && _avatarsToFade.isEmpty()) {
-        return;
+    PROFILE_RANGE(simulation, "updateOtherAvatars");
+    {
+        PROFILE_RANGE(simulation, "updateOtherAvatars - hash lock");
+        // lock the hash for read to check the size
+        QReadLocker lock(&_hashLock);
+        if (_avatarHash.size() < 2 && _avatarsToFade.isEmpty()) {
+            return;
+        }
+        lock.unlock();
     }
-    lock.unlock();
 
     PerformanceTimer perfTimer("otherAvatars");
 
-    class SortableAvatar: public PrioritySortUtil::Sortable {
+    class SortableAvatar : public PrioritySortUtil::Sortable {
     public:
         SortableAvatar() = delete;
         SortableAvatar(const AvatarSharedPointer& avatar) : _avatar(avatar) {}
@@ -173,21 +177,24 @@ void AvatarManager::updateOtherAvatars(float deltaTime) {
 
     const auto& views = qApp->getConicalViews();
     PrioritySortUtil::PriorityQueue<SortableAvatar> sortedAvatars(views,
-            AvatarData::_avatarSortCoefficientSize,
-            AvatarData::_avatarSortCoefficientCenter,
-            AvatarData::_avatarSortCoefficientAge);
+        AvatarData::_avatarSortCoefficientSize,
+        AvatarData::_avatarSortCoefficientCenter,
+        AvatarData::_avatarSortCoefficientAge);
 
     // sort
-    auto avatarMap = getHashCopy();
-    AvatarHash::iterator itr = avatarMap.begin();
-    while (itr != avatarMap.end()) {
-        const auto& avatar = std::static_pointer_cast<Avatar>(*itr);
-        // DO NOT update _myAvatar!  Its update has already been done earlier in the main loop.
-        // DO NOT update or fade out uninitialized Avatars
-        if (avatar != _myAvatar && avatar->isInitialized()) {
-            sortedAvatars.push(SortableAvatar(avatar));
+    {
+        PROFILE_RANGE(simulation, "updateOtherAvatars - sort loop");
+        auto avatarMap = getHashCopy();
+        AvatarHash::iterator itr = avatarMap.begin();
+        while (itr != avatarMap.end()) {
+            const auto& avatar = std::static_pointer_cast<Avatar>(*itr);
+            // DO NOT update _myAvatar!  Its update has already been done earlier in the main loop.
+            // DO NOT update or fade out uninitialized Avatars
+            if (avatar != _myAvatar && avatar->isInitialized()) {
+                sortedAvatars.push(SortableAvatar(avatar));
+            }
+            ++itr;
         }
-        ++itr;
     }
 
     // process in sorted order
@@ -199,121 +206,165 @@ void AvatarManager::updateOtherAvatars(float deltaTime) {
     bool physicsEnabled = qApp->isPhysicsEnabled();
 
     render::Transaction transaction;
-    while (!sortedAvatars.empty()) {
-        const SortableAvatar& sortData = sortedAvatars.top();
-        const auto avatar = std::static_pointer_cast<Avatar>(sortData.getAvatar());
-        const auto otherAvatar = std::static_pointer_cast<OtherAvatar>(sortData.getAvatar());
+    {
+        PROFILE_RANGE(simulation, "updateOtherAvatars - process sorted loop");
+        while (!sortedAvatars.empty()) {
+            const SortableAvatar& sortData = sortedAvatars.top();
+            const auto avatar = std::static_pointer_cast<Avatar>(sortData.getAvatar());
+            const auto otherAvatar = std::static_pointer_cast<OtherAvatar>(sortData.getAvatar());
 
-        // if the geometry is loaded then turn off the orb
-        if (avatar->getSkeletonModel()->isLoaded()) {
-            // remove the orb if it is there
-            otherAvatar->removeOrb();
-        } else {
-            otherAvatar->updateOrbPosition();
-        }
-
-        bool ignoring = DependencyManager::get<NodeList>()->isPersonalMutingNode(avatar->getID());
-        if (ignoring) {
-            sortedAvatars.pop();
-            continue;
-        }
-
-        // for ALL avatars...
-        if (_shouldRender) {
-            avatar->ensureInScene(avatar, qApp->getMain3DScene());
-        }
-        if (physicsEnabled && !avatar->isInPhysicsSimulation()) {
-            ShapeInfo shapeInfo;
-            avatar->computeShapeInfo(shapeInfo);
-            btCollisionShape* shape = const_cast<btCollisionShape*>(ObjectMotionState::getShapeManager()->getShape(shapeInfo));
-            if (shape) {
-                AvatarMotionState* motionState = new AvatarMotionState(avatar, shape);
-                motionState->setMass(avatar->computeMass());
-                avatar->setPhysicsCallback([=] (uint32_t flags) { motionState->addDirtyFlags(flags); });
-                _motionStates.insert(avatar.get(), motionState);
-                _motionStatesToAddToPhysics.insert(motionState);
+            {
+                PROFILE_RANGE(simulation, "updateOtherAvatars - process sorted loop - removeOrb/updateOrbPosition");
+                // if the geometry is loaded then turn off the orb
+                if (avatar->getSkeletonModel()->isLoaded()) {
+                    // remove the orb if it is there
+                    otherAvatar->removeOrb();
+                }
+                else {
+                    otherAvatar->updateOrbPosition();
+                }
             }
-        }
-        avatar->animateScaleChanges(deltaTime);
+            {
+                PROFILE_RANGE(simulation, "updateOtherAvatars - process sorted loop - ignoring pop");
+                bool ignoring = DependencyManager::get<NodeList>()->isPersonalMutingNode(avatar->getID());
+                if (ignoring) {
+                    sortedAvatars.pop();
+                    continue;
+                }
+            }
+            {
+                PROFILE_RANGE(simulation, "updateOtherAvatars - process sorted loop - ensureInScene");
+                // for ALL avatars...
+                if (_shouldRender) {
+                    avatar->ensureInScene(avatar, qApp->getMain3DScene());
+                }
+            }
+            {
+                PROFILE_RANGE(simulation, "updateOtherAvatars - process sorted loop - check shape");
+                if (physicsEnabled && !avatar->isInPhysicsSimulation()) {
+                    ShapeInfo shapeInfo;
+                    avatar->computeShapeInfo(shapeInfo);
+                    btCollisionShape* shape = const_cast<btCollisionShape*>(ObjectMotionState::getShapeManager()->getShape(shapeInfo));
+                    if (shape) {
+                        PROFILE_RANGE(simulation, "updateOtherAvatars - process sorted loop - motion state");
+                        AvatarMotionState* motionState = new AvatarMotionState(avatar, shape);
+                        motionState->setMass(avatar->computeMass());
+                        avatar->setPhysicsCallback([=](uint32_t flags) { motionState->addDirtyFlags(flags); });
+                        _motionStates.insert(avatar.get(), motionState);
+                        _motionStatesToAddToPhysics.insert(motionState);
+                    }
+                }
+            }
+            {
+                PROFILE_RANGE(simulation, "updateOtherAvatars - process sorted loop - animateScaleChanges");
+                avatar->animateScaleChanges(deltaTime);
+            }
+            {
+                PROFILE_RANGE(simulation, "updateOtherAvatars - process sorted loop - check updateExpiry");
+                const float OUT_OF_VIEW_THRESHOLD = 0.5f * AvatarData::OUT_OF_VIEW_PENALTY;
+                uint64_t now = usecTimestampNow();
+                if (now < updateExpiry) {
+                    // we're within budget
+                    PROFILE_RANGE(simulation, "updateOtherAvatars - process sorted loop - now < updateExpiry");
+                    bool inView = sortData.getPriority() > OUT_OF_VIEW_THRESHOLD;
+                    if (inView && avatar->hasNewJointData()) {
+                        numAvatarsUpdated++;
+                    }
+                    avatar->simulate(deltaTime, inView);
+                    avatar->updateRenderItem(transaction);
+                    avatar->setLastRenderUpdateTime(startTime);
+                }
+                else {
+                    // we've spent our full time budget --> bail on the rest of the avatar updates
+                    // --> more avatars may freeze until their priority trickles up
+                    // --> some scale or fade animations may glitch
+                    // --> some avatar velocity measurements may be a little off
 
-        const float OUT_OF_VIEW_THRESHOLD = 0.5f * AvatarData::OUT_OF_VIEW_PENALTY;
-        uint64_t now = usecTimestampNow();
-        if (now < updateExpiry) {
-            // we're within budget
-            bool inView = sortData.getPriority() > OUT_OF_VIEW_THRESHOLD;
-            if (inView && avatar->hasNewJointData()) {
-                numAvatarsUpdated++;
-            }
-            avatar->simulate(deltaTime, inView);
-            avatar->updateRenderItem(transaction);
-            avatar->setLastRenderUpdateTime(startTime);
-        } else {
-            // we've spent our full time budget --> bail on the rest of the avatar updates
-            // --> more avatars may freeze until their priority trickles up
-            // --> some scale or fade animations may glitch
-            // --> some avatar velocity measurements may be a little off
-
-            // no time simulate, but we take the time to count how many were tragically missed
-            bool inView = sortData.getPriority() > OUT_OF_VIEW_THRESHOLD;
-            if (!inView) {
-                break;
-            }
-            if (inView && avatar->hasNewJointData()) {
-                numAVatarsNotUpdated++;
-            }
-            sortedAvatars.pop();
-            while (inView && !sortedAvatars.empty()) {
-                const SortableAvatar& newSortData = sortedAvatars.top();
-                const auto newAvatar = std::static_pointer_cast<Avatar>(newSortData.getAvatar());
-                inView = newSortData.getPriority() > OUT_OF_VIEW_THRESHOLD;
-                if (inView && newAvatar->hasNewJointData()) {
-                    numAVatarsNotUpdated++;
+                    // no time simulate, but we take the time to count how many were tragically missed
+                    PROFILE_RANGE(simulation, "updateOtherAvatars - process sorted loop - now >= updateExpiry");
+                    bool inView = sortData.getPriority() > OUT_OF_VIEW_THRESHOLD;
+                    if (!inView) {
+                        break;
+                    }
+                    {
+                        PROFILE_RANGE(simulation, "updateOtherAvatars - process sorted loop - now >= updateExpiry part A");
+                        if (inView && avatar->hasNewJointData()) {
+                            numAVatarsNotUpdated++;
+                        }
+                        sortedAvatars.pop();
+                    }
+                    {
+                        PROFILE_RANGE(simulation, "updateOtherAvatars - process sorted loop - now >= updateExpiry part B loop");
+                        while (inView && !sortedAvatars.empty()) {
+                            PROFILE_RANGE(simulation, "updateOtherAvatars - process sorted loop - now >= updateExpiry part B loop internal");
+                            const SortableAvatar& newSortData = sortedAvatars.top();
+                            const auto newAvatar = std::static_pointer_cast<Avatar>(newSortData.getAvatar());
+                            inView = newSortData.getPriority() > OUT_OF_VIEW_THRESHOLD;
+                            if (inView && newAvatar->hasNewJointData()) {
+                                numAVatarsNotUpdated++;
+                            }
+                            sortedAvatars.pop();
+                        }
+                        break;
+                    }
                 }
                 sortedAvatars.pop();
             }
-            break;
         }
-        sortedAvatars.pop();
     }
 
-    if (_shouldRender) {
-        if (!_avatarsToFade.empty()) {
-            QReadLocker lock(&_hashLock);
-            QVector<AvatarSharedPointer>::iterator itr = _avatarsToFade.begin();
-            while (itr != _avatarsToFade.end() && usecTimestampNow() > updateExpiry) {
-                auto avatar = std::static_pointer_cast<Avatar>(*itr);
-                avatar->animateScaleChanges(deltaTime);
-                avatar->simulate(deltaTime, true);
-                avatar->updateRenderItem(transaction);
-                ++itr;
+    {
+        PROFILE_RANGE(simulation, "updateOtherAvatars - loop 2");
+        if (_shouldRender) {
+            if (!_avatarsToFade.empty()) {
+                QReadLocker lock(&_hashLock);
+                QVector<AvatarSharedPointer>::iterator itr = _avatarsToFade.begin();
+                while (itr != _avatarsToFade.end() && usecTimestampNow() > updateExpiry) {
+                    PROFILE_RANGE(simulation, "updateOtherAvatars - loop 2 internal");
+                    auto avatar = std::static_pointer_cast<Avatar>(*itr);
+                    avatar->animateScaleChanges(deltaTime);
+                    avatar->simulate(deltaTime, true);
+                    avatar->updateRenderItem(transaction);
+                    ++itr;
+                }
             }
+            qApp->getMain3DScene()->enqueueTransaction(transaction);
         }
-        qApp->getMain3DScene()->enqueueTransaction(transaction);
     }
 
     _numAvatarsUpdated = numAvatarsUpdated;
     _numAvatarsNotUpdated = numAVatarsNotUpdated;
 
-    simulateAvatarFades(deltaTime);
+    {
+        PROFILE_RANGE(simulation, "updateOtherAvatars - simulateAvatarFades");
+        simulateAvatarFades(deltaTime);
+    }
 
-    // Check on avatars with pending identities:
-    steady_clock::time_point now = steady_clock::now();
-    QWriteLocker writeLock(&_hashLock);
-    for (auto pendingAvatar = _pendingAvatars.begin(); pendingAvatar != _pendingAvatars.end(); ++pendingAvatar) {
-        if (now - pendingAvatar->creationTime >= REQUEST_UNKNOWN_IDENTITY_DELAY) {
-            // Too long without an ID
-            sendIdentityRequest(pendingAvatar->avatar->getID());
-            if (++pendingAvatar->transmits >= REQUEST_UNKNOWN_IDENTITY_TRANSMITS) {
-                qCDebug(avatars) << "Requesting identity for unknown avatar (final request)" <<
-                    pendingAvatar->avatar->getID().toString();
+    {
+        PROFILE_RANGE(simulation, "updateOtherAvatars - pendingAvatars loop");
+        // Check on avatars with pending identities:
+        steady_clock::time_point now = steady_clock::now();
+        QWriteLocker writeLock(&_hashLock);
+        for (auto pendingAvatar = _pendingAvatars.begin(); pendingAvatar != _pendingAvatars.end(); ++pendingAvatar) {
+            if (now - pendingAvatar->creationTime >= REQUEST_UNKNOWN_IDENTITY_DELAY) {
+                PROFILE_RANGE(simulation, "updateOtherAvatars - pendingAvatars loop internal");
+                // Too long without an ID
+                sendIdentityRequest(pendingAvatar->avatar->getID());
+                if (++pendingAvatar->transmits >= REQUEST_UNKNOWN_IDENTITY_TRANSMITS) {
+                    PROFILE_RANGE(simulation, "updateOtherAvatars - pendingAvatars loop internal - if");
+                    qCDebug(avatars) << "Requesting identity for unknown avatar (final request)" <<
+                        pendingAvatar->avatar->getID().toString();
 
-                pendingAvatar = _pendingAvatars.erase(pendingAvatar);
-                if (pendingAvatar == _pendingAvatars.end()) {
-                    break;
+                    pendingAvatar = _pendingAvatars.erase(pendingAvatar);
+                    if (pendingAvatar == _pendingAvatars.end()) {
+                        break;
+                    }
                 }
-            } else {
-                pendingAvatar->creationTime = now;
-                qCDebug(avatars) << "Requesting identity for unknown avatar" << pendingAvatar->avatar->getID().toString();
+                else {
+                    PROFILE_RANGE(simulation, "updateOtherAvatars - pendingAvatars loop internal - else");
+                    pendingAvatar->creationTime = now;
+                    qCDebug(avatars) << "Requesting identity for unknown avatar" << pendingAvatar->avatar->getID().toString();
+                }
             }
         }
     }

@@ -75,16 +75,22 @@ void Overlays::init() {
 
 void Overlays::update(float deltatime) {
     {
+        PROFILE_RANGE(app, "Overlays::update - lock");
         QMutexLocker locker(&_mutex);
         foreach(const auto& thisOverlay, _overlaysHUD) {
+            PROFILE_RANGE(app, "Overlays::update - _overlaysHUD loop");
             thisOverlay->update(deltatime);
         }
         foreach(const auto& thisOverlay, _overlaysWorld) {
+            PROFILE_RANGE(app, "Overlays::update - _overlaysWorld loop");
             thisOverlay->update(deltatime);
         }
     }
 
-    cleanupOverlaysToDelete();
+    {
+        PROFILE_RANGE(app, "Overlays::update - cleanupOverlaysToDelete");
+        cleanupOverlaysToDelete();
+    }
 }
 
 void Overlays::cleanupOverlaysToDelete() {
