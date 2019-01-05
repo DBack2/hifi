@@ -643,6 +643,18 @@ void RenderDeferred::run(const RenderContextPointer& renderContext, const Inputs
 }
 
 
+static const char* DEFAULT_SKYBOX_TEXTURE = "images/Skybox/Sky_Day%20Sun%20Peak%20Clear_Cam_0_Front.texmeta.json";
+static const glm::vec3 DEFAULT_SKYBOX_DIRECTION = glm::vec3(0.0f, -0.7071067690849304f, 0.7071067690849304f);
+static const glm::vec3 DEFAULT_SKYBOX_COLOR = glm::u8vec3(255, 197, 150);
+static const float DEFAULT_SKYBOX_INTENSITY = 1.5f;
+static const float DEFAULT_SKYBOX_AMBIENT_ITENSITY = 0.5f;
+static const glm::vec3 DEFAULT_SKYBOX_HAZE_COLOR = glm::u8vec3(128, 157, 179);
+static const float DEFAULT_SKYBOX_HAZE_BACKGROUND_BLEND = 0.76f;
+static const float DEFAULT_SKYBOX_HAZE_GLARE_ANGLE = 52.0f;
+static const glm::vec3 DEFAULT_SKYBOX_HAZE_GLARE_COLOR = glm::u8vec3(255, 201, 99);
+static const float DEFAULT_SKYBOX_HAZE_RANGE = 1000.0f;
+static const float DEFAULT_SKYBOX_HAZE_BASE = 0.0f;
+static const float DEFAULT_SKYBOX_HAZE_CEILING = 200.0f;
 
 void DefaultLightingSetup::run(const RenderContextPointer& renderContext) {
 
@@ -650,7 +662,7 @@ void DefaultLightingSetup::run(const RenderContextPointer& renderContext) {
         if (!_defaultSkyboxNetworkTexture) {
             PROFILE_RANGE(render, "Process Default Skybox");
             _defaultSkyboxNetworkTexture = DependencyManager::get<TextureCache>()->getTexture(
-                PathUtils::resourcesUrl() + "images/Default-Sky-9-cubemap/Default-Sky-9-cubemap.texmeta.json", image::TextureUsage::CUBE_TEXTURE);
+                PathUtils::resourcesUrl() + DEFAULT_SKYBOX_TEXTURE, image::TextureUsage::CUBE_TEXTURE);
         }
 
         if (_defaultSkyboxNetworkTexture && _defaultSkyboxNetworkTexture->isLoaded() && _defaultSkyboxNetworkTexture->getGPUTexture()) {
@@ -667,13 +679,13 @@ void DefaultLightingSetup::run(const RenderContextPointer& renderContext) {
             // Allocate a default global light directional and ambient
             auto lp = std::make_shared<graphics::Light>();
             lp->setType(graphics::Light::SUN);
-            lp->setDirection(glm::vec3(-1.0f));
-            lp->setColor(glm::vec3(1.0f));
-            lp->setIntensity(1.0f);
-            lp->setType(graphics::Light::SUN);
+            lp->setDirection(DEFAULT_SKYBOX_DIRECTION);
+            lp->setColor(toGlm(DEFAULT_SKYBOX_COLOR));
+            lp->setIntensity(DEFAULT_SKYBOX_INTENSITY);
+            lp->setCastShadows(true);
             lp->setAmbientSpherePreset(gpu::SphericalHarmonics::Preset::OLD_TOWN_SQUARE);
 
-            lp->setAmbientIntensity(0.5f);
+            lp->setAmbientIntensity(DEFAULT_SKYBOX_AMBIENT_ITENSITY);
             lp->setAmbientMap(_defaultSkyboxAmbientTexture);
             auto irradianceSH = _defaultSkyboxAmbientTexture->getIrradiance();
             if (irradianceSH) {
@@ -707,6 +719,17 @@ void DefaultLightingSetup::run(const RenderContextPointer& renderContext) {
         if (hazeStage) {
 
             auto haze = std::make_shared<graphics::Haze>();
+
+            haze->setHazeColor(toGlm(DEFAULT_SKYBOX_HAZE_COLOR));
+            haze->setHazeBaseReference(DEFAULT_SKYBOX_HAZE_BASE);
+            float hazeAltitude = DEFAULT_SKYBOX_HAZE_CEILING - DEFAULT_SKYBOX_HAZE_BASE;
+            haze->setHazeAltitudeFactor(graphics::Haze::convertHazeAltitudeToHazeAltitudeFactor(hazeAltitude));
+            haze->setHazeBackgroundBlend(DEFAULT_SKYBOX_HAZE_BACKGROUND_BLEND);
+            haze->setHazeEnableGlare(true);
+            haze->setHazeGlareBlend(graphics::Haze::convertGlareAngleToPower(DEFAULT_SKYBOX_HAZE_GLARE_ANGLE));
+            haze->setHazeGlareColor(toGlm(DEFAULT_SKYBOX_HAZE_GLARE_COLOR));
+            haze->setHazeRangeFactor(graphics::Haze::convertHazeRangeToHazeRangeFactor(DEFAULT_SKYBOX_HAZE_RANGE));
+            haze->setHazeActive(true);
 
             _defaultHaze = haze;
             _defaultHazeID = hazeStage->addHaze(_defaultHaze);

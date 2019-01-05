@@ -1,0 +1,8 @@
+{
+    "compressed": {
+        "COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT": "Sky_Day Sun Peak Clear_Cam_0_Front_COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT.ktx",
+        "COMPRESSED_SRGB8_ETC2": "Sky_Day Sun Peak Clear_Cam_0_Front_COMPRESSED_SRGB8_ETC2.ktx"
+    },
+    "original": "Sky_Day Sun Peak Clear_Cam_0_Front.png",
+    "uncompressed": "Sky_Day Sun Peak Clear_Cam_0_Front.ktx"
+}
