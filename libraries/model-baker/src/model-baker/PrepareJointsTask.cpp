@@ -57,8 +57,10 @@ void PrepareJointsTask::run(const baker::BakeContextPointer& context, const Inpu
     auto& jointRotationOffsets = output.edit1();
     auto& jointIndices = output.edit2();
 
-    // Get joint renames
+    // Get joint renames and offsets
     auto jointNameMapping = getJointNameMapping(mapping);
+    auto offsets = getJointRotationOffsets(mapping);
+
     // Apply joint metadata from FST file mappings
     for (const auto& jointIn : jointsIn) {
         jointsOut.push_back(jointIn);
@@ -67,13 +69,18 @@ void PrepareJointsTask::run(const baker::BakeContextPointer& context, const Inpu
         auto jointNameMapKey = jointNameMapping.key(jointIn.name);
         if (jointNameMapping.contains(jointNameMapKey)) {
             jointOut.name = jointNameMapKey;
+        } else {
+            // If this FST prepended extra bone names with _ExtraBone then do the same here
+            QString extraBoneName = jointOut.name + "_ExtraBone";
+            if (offsets.contains(extraBoneName)) {
+                jointOut.name = extraBoneName;
+            }
         }
 
         jointIndices.insert(jointOut.name, (int)jointsOut.size());
     }
 
     // Get joint rotation offsets from FST file mappings
-    auto offsets = getJointRotationOffsets(mapping);
     for (auto itr = offsets.begin(); itr != offsets.end(); itr++) {
         QString jointName = itr.key();
         int jointIndex = jointIndices.value(jointName) - 1;

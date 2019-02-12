@@ -14,7 +14,7 @@ using System.Collections.Generic;
 
 class AvatarExporter : MonoBehaviour {
     // update version number for every PR that changes this file, also set updated version in README file
-    static readonly string AVATAR_EXPORTER_VERSION = "0.2";
+    static readonly string AVATAR_EXPORTER_VERSION = "0.3";
     
     static readonly float HIPS_GROUND_MIN_Y = 0.01f;
     static readonly float HIPS_SPINE_CHEST_MIN_SEPARATION = 0.001f;
@@ -557,7 +557,8 @@ class AvatarExporter : MonoBehaviour {
                 Quaternion rotation = REFERENCE_ROTATIONS[userBoneInfo.humanName];
                 jointOffset = Quaternion.Inverse(userBoneInfo.rotation) * rotation;
             } else {
-                outputJointName = userBoneName;
+                // append extra bone names with _ExtraBone so we can ensure they don't overlap with any HiFi bone names
+                outputJointName = userBoneName + "_ExtraBone";
                 jointOffset = Quaternion.Inverse(userBoneInfo.rotation);
                 string lastRequiredParent = FindLastRequiredAncestorBone(userBoneName);
                 if (lastRequiredParent != "root") {
