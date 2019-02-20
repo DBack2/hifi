@@ -80,7 +80,6 @@ int ScriptableAvatar::getJointIndex(const QString& name) const {
 QStringList ScriptableAvatar::getJointNames() const {
     QReadLocker readLock(&_jointDataLock);
     return _fstJointNames;
-    return QStringList();
 }
 
 void ScriptableAvatar::setSkeletonModelURL(const QUrl& skeletonModelURL) {

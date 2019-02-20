@@ -1133,6 +1133,7 @@ void ModelEntityRenderer::animate(const TypedEntityPointer& entity) {
 
     auto& originalHFMJoints = _model->getHFMModel().joints;
     auto& originalHFMIndices = _model->getHFMModel().jointIndices;
+    auto& originalHFMMappings = _model->getHFMModel().jointMappings;
 
     bool allowTranslation = entity->getAnimationAllowTranslation();
 
@@ -1152,6 +1153,9 @@ void ModelEntityRenderer::animate(const TypedEntityPointer& entity) {
                 }
             } else if (index < animationJointNames.size()) {
                 QString jointName = hfmJoints[index].name; // Pushing this here so its not done on every entity, with the exceptions of those allowing for translation
+                if (originalHFMMappings.contains(jointName)) {
+                    jointName = originalHFMMappings[jointName];
+                }
                 if (originalHFMIndices.contains(jointName)) {
                     // Making sure the joint names exist in the original model the animation is trying to apply onto. If they do, then remap and get it's translation.
                     int remappedIndex = originalHFMIndices[jointName] - 1; // JointIndeces seem to always start from 1 and the found index is always 1 higher than actual.

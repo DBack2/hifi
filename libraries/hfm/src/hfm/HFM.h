@@ -284,6 +284,7 @@ public:
 
     QVector<Joint> joints;
     QHash<QString, int> jointIndices; ///< 1-based, so as to more easily detect missing indices
+    QHash<QString, QString> jointMappings;
     bool hasSkeletonJoints;
 
     QVector<Mesh> meshes;

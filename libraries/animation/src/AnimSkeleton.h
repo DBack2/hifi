@@ -82,6 +82,7 @@ protected:
     std::vector<int> _nonMirroredIndices;
     std::vector<int> _mirrorMap;
     QHash<QString, int> _jointIndicesByName;
+    QHash<QString, QString> _jointMappings;
     std::vector<std::vector<HFMCluster>> _clusterBindMatrixOriginalValues;
 
     // no copies

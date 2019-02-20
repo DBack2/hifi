@@ -920,6 +920,7 @@ public:
      */
     /// Returns the index of the joint with the specified name, or -1 if not found/unknown.
     Q_INVOKABLE virtual int getJointIndex(const QString& name) const;
+    Q_INVOKABLE virtual int getJointIndex(const QString& name, bool useHumanMappings) const { return getJointIndex(name); }
 
     /**jsdoc
      * Get the names of all the joints in the current avatar.

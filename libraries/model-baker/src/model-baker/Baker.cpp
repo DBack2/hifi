@@ -101,7 +101,7 @@ namespace baker {
 
     class BuildModelTask {
     public:
-        using Input = VaryingSet5<hfm::Model::Pointer, std::vector<hfm::Mesh>, std::vector<hfm::Joint>, QMap<int, glm::quat>, QHash<QString, int>>;
+        using Input = VaryingSet6<hfm::Model::Pointer, std::vector<hfm::Mesh>, std::vector<hfm::Joint>, QMap<int, glm::quat>, QHash<QString, int>, QHash<QString, QString>>;
         using Output = hfm::Model::Pointer;
         using JobModel = Job::ModelIO<BuildModelTask, Input, Output>;
 
@@ -111,6 +111,7 @@ namespace baker {
             hfmModelOut->joints = QVector<hfm::Joint>::fromStdVector(input.get2());
             hfmModelOut->jointRotationOffsets = input.get3();
             hfmModelOut->jointIndices = input.get4();
+            hfmModelOut->jointMappings = input.get5();
             output = hfmModelOut;
         }
     };
@@ -153,6 +154,7 @@ namespace baker {
             const auto jointsOut = jointInfoOut.getN<PrepareJointsTask::Output>(0);
             const auto jointRotationOffsets = jointInfoOut.getN<PrepareJointsTask::Output>(1);
             const auto jointIndices = jointInfoOut.getN<PrepareJointsTask::Output>(2);
+            const auto jointMappings = jointInfoOut.getN<PrepareJointsTask::Output>(3);
 
             // Parse material mapping
             const auto materialMapping = model.addJob<ParseMaterialMappingTask>("ParseMaterialMapping", mapping);
@@ -162,7 +164,7 @@ namespace baker {
             const auto blendshapesPerMeshOut = model.addJob<BuildBlendshapesTask>("BuildBlendshapes", buildBlendshapesInputs);
             const auto buildMeshesInputs = BuildMeshesTask::Input(meshesIn, graphicsMeshes, normalsPerMesh, tangentsPerMesh, blendshapesPerMeshOut).asVarying();
             const auto meshesOut = model.addJob<BuildMeshesTask>("BuildMeshes", buildMeshesInputs);
-            const auto buildModelInputs = BuildModelTask::Input(hfmModelIn, meshesOut, jointsOut, jointRotationOffsets, jointIndices).asVarying();
+            const auto buildModelInputs = BuildModelTask::Input(hfmModelIn, meshesOut, jointsOut, jointRotationOffsets, jointIndices, jointMappings).asVarying();
             const auto hfmModelOut = model.addJob<BuildModelTask>("BuildModel", buildModelInputs);
 
             output = Output(hfmModelOut, materialMapping);

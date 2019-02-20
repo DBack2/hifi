@@ -551,14 +551,10 @@ class AvatarExporter : MonoBehaviour {
             
             // generate joint rotation offsets for both humanoid-mapped bones as well as extra unmapped bones
             Quaternion jointOffset = new Quaternion();
-            string outputJointName = "";
             if (userBoneInfo.HasHumanMapping()) {
-                outputJointName = HUMANOID_TO_HIFI_JOINT_NAME[userBoneInfo.humanName];
                 Quaternion rotation = REFERENCE_ROTATIONS[userBoneInfo.humanName];
                 jointOffset = Quaternion.Inverse(userBoneInfo.rotation) * rotation;
             } else {
-                // append extra bone names with _ExtraBone so we can ensure they don't overlap with any HiFi bone names
-                outputJointName = userBoneName + "_ExtraBone";
                 jointOffset = Quaternion.Inverse(userBoneInfo.rotation);
                 string lastRequiredParent = FindLastRequiredAncestorBone(userBoneName);
                 if (lastRequiredParent != "root") {
@@ -570,11 +566,9 @@ class AvatarExporter : MonoBehaviour {
             }
             
             // swap from left-handed (Unity) to right-handed (HiFi) coordinates and write out joint rotation offset to fst
-            if (!string.IsNullOrEmpty(outputJointName)) {
-                jointOffset = new Quaternion(-jointOffset.x, jointOffset.y, jointOffset.z, -jointOffset.w);
-                File.AppendAllText(exportFstPath, "jointRotationOffset = " + outputJointName + " = (" + jointOffset.x + ", " +
-                                                  jointOffset.y + ", " + jointOffset.z + ", " + jointOffset.w + ")\n");
-            }
+            jointOffset = new Quaternion(-jointOffset.x, jointOffset.y, jointOffset.z, -jointOffset.w);
+            File.AppendAllText(exportFstPath, "jointRotationOffset = " + userBoneName + " = (" + jointOffset.x + ", " +
+                                              jointOffset.y + ", " + jointOffset.z + ", " + jointOffset.w + ")\n");
         }
              
         // open File Explorer to the project directory once finished

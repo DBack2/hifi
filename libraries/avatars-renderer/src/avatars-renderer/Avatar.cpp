@@ -1414,6 +1414,7 @@ void Avatar::withValidJointIndicesCache(std::function<void()> const& worker) con
                 _modelJointIndicesCache.clear();
                 if (_skeletonModel && _skeletonModel->isActive()) {
                     _modelJointIndicesCache = _skeletonModel->getHFMModel().jointIndices;
+                    _modelJointMappingsCache = _skeletonModel->getHFMModel().jointMappings;
                     _modelJointsCached = true;
                 }
             }
@@ -1423,14 +1424,22 @@ void Avatar::withValidJointIndicesCache(std::function<void()> const& worker) con
 }
 
 int Avatar::getJointIndex(const QString& name) const {
+    return getJointIndex(name, true);
+}
+
+int Avatar::getJointIndex(const QString& name, bool useHumanMappings) const {
     int result = getFauxJointIndex(name);
     if (result != -1) {
         return result;
     }
 
     withValidJointIndicesCache([&]() {
-        if (_modelJointIndicesCache.contains(name)) {
-            result = _modelJointIndicesCache[name] - 1;
+        QString jointName = name;
+        if (useHumanMappings && _modelJointMappingsCache.contains(name)) {
+            jointName = _modelJointMappingsCache[name];
+        }
+        if (_modelJointIndicesCache.contains(jointName)) {
+            result = _modelJointIndicesCache[jointName] - 1;
         }
     });
     return result;

@@ -193,6 +193,7 @@ public:
     using AvatarData::getJointTranslation;
     virtual glm::vec3 getJointTranslation(int index) const override;
     virtual int getJointIndex(const QString& name) const override;
+    virtual int getJointIndex(const QString& name, bool useHumanMappings) const override;
     virtual QStringList getJointNames() const override;
 
     /**jsdoc
@@ -575,6 +576,7 @@ protected:
     void invalidateJointIndicesCache() const;
     void withValidJointIndicesCache(std::function<void()> const& worker) const;
     mutable QHash<QString, int> _modelJointIndicesCache;
+    mutable QHash<QString, QString> _modelJointMappingsCache;
     mutable QReadWriteLock _modelJointIndicesCacheLock;
     mutable bool _modelJointsCached { false };
 

@@ -24,6 +24,7 @@ AnimSkeleton::AnimSkeleton(const HFMModel& hfmModel) {
         joints.push_back(joint);
     }
     buildSkeletonFromJoints(joints, hfmModel.jointRotationOffsets);
+    _jointMappings = hfmModel.jointMappings;
 
     // we make a copy of the inverseBindMatrices in order to prevent mutating the model bind pose
     // when we are dealing with a joint offset in the model
@@ -59,9 +60,14 @@ AnimSkeleton::AnimSkeleton(const std::vector<HFMJoint>& joints, const QMap<int, 
 }
 
 int AnimSkeleton::nameToJointIndex(const QString& jointName) const {
-    auto itr = _jointIndicesByName.find(jointName);
-    if (_jointIndicesByName.end() != itr) {
-        return itr.value();
+    QString name = jointName;
+    auto mappingItr = _jointMappings.find(jointName);
+    if (_jointMappings.end() != mappingItr) {
+        name = mappingItr.value();
+    }
+    auto indexItr = _jointIndicesByName.find(name);
+    if (_jointIndicesByName.end() != indexItr) {
+        return indexItr.value();
     }
     return -1;
 }
