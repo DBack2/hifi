@@ -516,13 +516,13 @@ getDistanceToCamera = function(position) {
     return toCameraDistance;
 }
 
-// Normalize degrees to be in the range (-180, 180)
+// Normalize degrees to be in the range [-180, 180)
 normalizeDegrees = function(degrees) {
-    var maxDegrees = 360;
-    var halfMaxDegrees = maxDegrees / 2;
-    degrees = ((degrees + halfMaxDegrees) % maxDegrees) - halfMaxDegrees;
-    if (degrees <= -halfMaxDegrees) {
-        degrees += maxDegrees;
+    while (degrees >= 180) {
+        degrees -= 360;
+    }
+    while (degrees < -180) {
+        degrees += 360;
     }
     return degrees;
 }
@@ -532,13 +532,6 @@ normalizeEulerAngles = function(eulerAngles) {
     eulerAngles.y = normalizeDegrees(eulerAngles.y);
     eulerAngles.z = normalizeDegrees(eulerAngles.z);
     return eulerAngles;
-}
-
-getEulerAngleDifference = function(angleVectorA, angleVectorB) {
-    var xDifference = Math.abs(angleVectorA.x - angleVectorB.x);
-    var yDifference = Math.abs(angleVectorA.y - angleVectorB.y);
-    var zDifference = Math.abs(angleVectorA.z - angleVectorB.z);
-    return xDifference + yDifference + zDifference;
 }
 
 deepCopy = function(v) {

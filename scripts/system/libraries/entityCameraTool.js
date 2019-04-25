@@ -452,16 +452,6 @@ CameraManager = function() {
         cameraTool.update();
     }
 
-    function normalizeDegrees(degrees) {
-        while (degrees > 180) {
-            degrees -= 360;
-        }
-        while (degrees < -180) {
-            degrees += 360;
-        }
-        return degrees;
-    }
-
     // Ease the position and orbit of the camera
     that.update = function(dt) {
         if (Camera.mode !== "independent") {
