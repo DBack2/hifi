@@ -2003,6 +2003,7 @@ SelectionDisplay = (function() {
     const PERFORM_SNAP_BEGIN = true;
     const PERFORM_SNAP_MOVE = true;
     const PERFORM_SNAP_END = true;
+    const HOLD_CTRL = false;
     
     // TOOL DEFINITION: HANDLE TRANSLATE XZ TOOL
     function addHandleTranslateXZTool(overlay, mode, doDuplicate) {
@@ -2074,7 +2075,7 @@ SelectionDisplay = (function() {
 
                 isConstrained = false;
                 
-                if (PERFORM_SNAP_BEGIN && !lastMouseEvent.isControl) {
+                if (PERFORM_SNAP_BEGIN && HOLD_CTRL === lastMouseEvent.isControl) {
                     SelectionUtils.performSnap(pickRay, initialRotation, true);
                 }
                 
@@ -2084,7 +2085,7 @@ SelectionDisplay = (function() {
             },
             onEnd: function(event, reason) {
                 var pickRay = generalComputePickRay(event.x, event.y);
-                if (PERFORM_SNAP_END && !lastMouseEvent.isControl) {
+                if (PERFORM_SNAP_END && HOLD_CTRL === lastMouseEvent.isControl) {
                     SelectionUtils.performSnap(pickRay, initialRotation, false);
                 }
                 pushCommandForSelections(duplicatedEntityIDs);
@@ -2105,7 +2106,7 @@ SelectionDisplay = (function() {
             onMove: function(event) {
                 var wantDebug = false;
                 var pickRay = generalComputePickRay(event.x, event.y);
-                if (PERFORM_SNAP_MOVE && !lastMouseEvent.isControl) {
+                if (PERFORM_SNAP_MOVE && HOLD_CTRL === lastMouseEvent.isControl) {
                     SelectionUtils.performSnap(pickRay, initialRotation, false);
                     return;
                 }
@@ -2970,6 +2971,8 @@ SelectionUtils = (function() {
             newProperties.userData = JSON.stringify(newUserData);
             
             Entities.editEntity(entityID, newProperties);
+            
+            SelectionManager._update(false, this);
         }
     }
     
