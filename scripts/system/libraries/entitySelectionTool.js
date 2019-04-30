@@ -2074,8 +2074,8 @@ SelectionDisplay = (function() {
 
                 isConstrained = false;
                 
-                if (PERFORM_SNAP_BEGIN && lastMouseEvent.isControl) {
-                    SelectionUtils.performSnap(pickRay, initialRotation);
+                if (PERFORM_SNAP_BEGIN && !lastMouseEvent.isControl) {
+                    SelectionUtils.performSnap(pickRay, initialRotation, true);
                 }
                 
                 if (wantDebug) {
@@ -2084,8 +2084,8 @@ SelectionDisplay = (function() {
             },
             onEnd: function(event, reason) {
                 var pickRay = generalComputePickRay(event.x, event.y);
-                if (PERFORM_SNAP_END && lastMouseEvent.isControl) {
-                    SelectionUtils.performSnap(pickRay, initialRotation);
+                if (PERFORM_SNAP_END && !lastMouseEvent.isControl) {
+                    SelectionUtils.performSnap(pickRay, initialRotation, false);
                 }
                 pushCommandForSelections(duplicatedEntityIDs);
                 if (isConstrained) {
@@ -2105,8 +2105,8 @@ SelectionDisplay = (function() {
             onMove: function(event) {
                 var wantDebug = false;
                 var pickRay = generalComputePickRay(event.x, event.y);
-                if (PERFORM_SNAP_MOVE && lastMouseEvent.isControl) {
-                    SelectionUtils.performSnap(pickRay, initialRotation);
+                if (PERFORM_SNAP_MOVE && !lastMouseEvent.isControl) {
+                    SelectionUtils.performSnap(pickRay, initialRotation, false);
                     return;
                 }
 
@@ -2906,66 +2906,114 @@ SelectionDisplay = (function() {
 SelectionUtils = (function() {
     var that = {};
     
-    that.getSnapToNormalLocal = function(entityID) {
-        var snapToNormalLocal = getEntityCustomData("snapToNormalLocal", entityID, undefined);
-        return snapToNormalLocal;
+    const SNAP_POSITION_DIFFERENCE_MAXIMUM = 0.02;
+    const SNAP_NORMAL_DIFFERENCE_MAXIMUM = 0.2;
+    
+    that.getSnapPosition = function(entityID) {
+        var snapPosition = getEntityCustomData("snapPosition", entityID, undefined);
+        return snapPosition;
+    }
+    
+    
+    that.getSnapToSurfaceNormal = function(entityID) {
+        var snapToSurfaceNormal = getEntityCustomData("snapToSurfaceNormal", entityID, undefined);
+        return snapToSurfaceNormal;
+    }
+    
+    that.getSnapLocalNormal = function(entityID) {
+        var snapLocalNormal = getEntityCustomData("snapLocalNormal", entityID, undefined);
+        return snapLocalNormal;
     }
     
     that.isEntitySnapped = function(entityID) {
-        var snapToNormalLocal = that.getSnapToNormalLocal(entityID);
-        return snapToNormalLocal !== undefined;
+        var snapPosition = that.getSnapPosition(entityID);
+        var snapToSurfaceNormal = that.getSnapToSurfaceNormal(entityID);
+        var snapNormalLocal = that.getSnapLocalNormal(entityID);
+        if (snapPosition !== undefined && snapToSurfaceNormal !== undefined && snapNormalLocal !== undefined) {
+            var properties = Entities.getEntityProperties(entityID, ["position", "rotation"]);
+            var currentPosition = properties.position;
+            var currentRotation = properties.rotation;
+            var positionDifference = Vec3.subtract(currentPosition, snapPosition);
+            var positionDifferenceLength = Vec3.length(positionDifference);
+            if (positionDifferenceLength >= SNAP_POSITION_DIFFERENCE_MAXIMUM) {
+                return false;
+            }
+            var snapNormalWorld = Vec3.multiplyQbyV(currentRotation, snapNormalLocal);
+            var normalDifference = Quat.rotationBetween(snapNormalWorld, snapToSurfaceNormal);
+            var normalDifferenceVec = Quat.safeEulerAngles(normalDifference);
+            var normalDifferenceLength = Vec3.length(normalDifferenceVec);
+            if (normalDifferenceLength >= SNAP_NORMAL_DIFFERENCE_MAXIMUM) {
+                return false;
+            }
+            return true;
+        }
+        return false;
     }
 
-    that.performSnap = function(pickRay, initialRotation) {
+    that.performSnap = function(pickRay, preSnapRotation, onBegin) {
         var entityID = SelectionManager.selections[0];
         var ray = Entities.findRayIntersection(pickRay, true, [], [entityID]);        
         if (ray.intersects) {       
-            var properties = Entities.getEntityProperties(entityID, ["dimensions", "registrationPoint"]);
+            var properties = Entities.getEntityProperties(entityID, ["rotation", "dimensions", "registrationPoint"]);
+            var rotation = properties.rotation;
             var dimensions = properties.dimensions;
             var registrationPoint = properties.registrationPoint;
             var intersectPosition = ray.intersection;
             var intersectEntityID = ray.entityID;
             var intersectNormal = ray.surfaceNormal;
+
+            var newRotation;
+            var snapLocalNormal = that.getSnapLocalNormal(entityID);
             
-            const LOCAL_FACE_NORMALS = [
-                { x:1, y:0, z:0 },
-                { x:-1, y:0, z:0 },
-                { x:0, y:1, z:0 },
-                { x:0, y:-1, z:0 },
-                { x:0, y:0, z:1 },
-                { x:0, y:0, z:-1 },
-            ];
-            
-            var bestRotation;
-            var minRotationDifference = 360 * 3;
-            for (var i = 0; i < LOCAL_FACE_NORMALS.length; ++i) {
-                var faceNormalLocal = LOCAL_FACE_NORMALS[i];
-                var faceNormalWorld = Vec3.multiplyQbyV(initialRotation, faceNormalLocal);
-                var rotationBetween = Quat.rotationBetween(intersectNormal, faceNormalWorld);
-                var rotationBetweenVec = Quat.safeEulerAngles(rotationBetween);
-                var rotationDifference = Math.abs(rotationBetweenVec.x) + Math.abs(rotationBetweenVec.y) + Math.abs(rotationBetweenVec.z);
-                if (rotationDifference < minRotationDifference) {
-                    bestRotation = rotationBetween;
-                    minRotationDifference = rotationDifference;
+            if (onBegin && !that.isEntitySnapped(entityID)) {
+                const LOCAL_FACE_NORMALS = [
+                    { x:1, y:0, z:0 },
+                    { x:-1, y:0, z:0 },
+                    { x:0, y:1, z:0 },
+                    { x:0, y:-1, z:0 },
+                    { x:0, y:0, z:1 },
+                    { x:0, y:0, z:-1 },
+                ];
+                
+                var bestRotation;
+                var minRotationDifference = 360 * 3;
+                for (var i = 0; i < LOCAL_FACE_NORMALS.length; ++i) {
+                    var faceNormalLocal = LOCAL_FACE_NORMALS[i];
+                    var faceNormalWorld = Vec3.multiplyQbyV(preSnapRotation, faceNormalLocal);
+                    var rotationBetween = Quat.rotationBetween(intersectNormal, faceNormalWorld);
+                    var rotationBetweenVec = Quat.safeEulerAngles(rotationBetween);
+                    var rotationDifference = Math.abs(rotationBetweenVec.x) + Math.abs(rotationBetweenVec.y) + Math.abs(rotationBetweenVec.z);
+                    if (rotationDifference < minRotationDifference) {
+                        bestRotation = rotationBetween;
+                        minRotationDifference = rotationDifference;
+                        snapLocalNormal = faceNormalLocal;
+                    }
                 }
+                newRotation = Quat.multiply(Quat.inverse(bestRotation), preSnapRotation);
+            } else {
+                var snapToNormal = that.getSnapToSurfaceNormal(entityID);
+                var rotationBetween = Quat.rotationBetween(snapToNormal, intersectNormal);
+                newRotation = Quat.multiply(rotationBetween, rotation);
             }
-            
-            var newRotation = Quat.multiply(Quat.inverse(bestRotation), initialRotation);
 
             var intersectNormalLocal = Vec3.multiplyQbyV(Quat.inverse(newRotation), intersectNormal);       
             var pivotTimesDimensions = Vec3.multiplyVbyV(registrationPoint, dimensions);
             var pivotOffsetLocal = Vec3.multiplyVbyV(pivotTimesDimensions, intersectNormalLocal);
             var pivotOffsetWorld = Vec3.multiply(Vec3.length(pivotOffsetLocal), intersectNormal);
-            var newPosition = Vec3.sum(intersectPosition, pivotOffsetWorld);
+            var newPosition = Vec3.sum(intersectPosition, pivotOffsetWorld);            
             
             var newProperties = {};
             newProperties.position = newPosition;
             newProperties.rotation = newRotation;
             newProperties.parentID = intersectEntityID;
             
-            Entities.editEntity(entityID, newProperties);
+            var newUserData = getEntityUserData(entityID);
+            newUserData["snapPosition"] = newPosition;
+            newUserData["snapToSurfaceNormal"] = intersectNormal;
+            newUserData["snapLocalNormal"] = snapLocalNormal;
+            newProperties.userData = JSON.stringify(newUserData);
             
-            setEntityCustomData("snapToNormalLocal", entityID, intersectNormalLocal);
+            Entities.editEntity(entityID, newProperties);
         }
     }
     
