@@ -14,6 +14,7 @@
 #include <queue>
 
 #include "DependencyManager.h"
+#include "LogHandler.h"
 #include "SharedUtil.h"
 #include "StreamUtils.h"
 #include "SharedLogging.h"
@@ -758,7 +759,10 @@ const Transform SpatiallyNestable::getTransform() const {
     bool success;
     Transform result = getTransform(success);
     if (!success) {
-        qCDebug(shared) << "getTransform failed for" << getID();
+        if (repeatedGetTransformMessageID == -1) {
+            repeatedGetTransformMessageID = LogHandler::getInstance().newRepeatedMessageID();
+        }
+        HIFI_FCDEBUG_ID(shared(), repeatedGetTransformMessageID, "getTransform failed for" << getID());
     }
     return result;
 }

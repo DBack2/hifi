@@ -265,6 +265,8 @@ private:
     bool _queryAACubeIsPuffed { false };
 
     void breakParentingLoop() const;
+
+    mutable int repeatedGetTransformMessageID { -1 };
 };
 
 
